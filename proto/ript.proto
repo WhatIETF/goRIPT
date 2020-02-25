@@ -1,0 +1,72 @@
+syntax="proto3";
+
+service RiptService {
+    rpc Init(InitRequest) returns (google.protobuf.Empty) {
+        option (google.api.http) = {
+            post: "/api/v1/init"
+        };
+    }
+    rpc GetCaps(GetCapsRequest) returns (GetCapsResponse) {
+        option (google.api.http) = {
+            get: "/api/v1/caps"
+        };
+    }
+    rpc CreateCall(CreateCallRequest) returns (CreateCallResponse) {
+        option (google.api.http) = {
+            get: "/api/v1/calls/create"
+        };
+    }
+
+    // maybe combine these into a bidi stream
+    rpc GetEventStream(GetEventStreamRequest) returns (stream Event) {
+    }
+    rpc SendEvent(SendEventRequest) returns (google.protobuf.Empty) {
+    }
+
+    // pseudocode for how you get a WebTransport. How is callID supplied?
+    rpc MediaStream(TBD) returns (TBD) {
+    }
+}
+
+message InitRequest {
+}
+
+message GetCapsRequest {
+}
+
+message GetCapsResponse {
+  uint32 maxBitRate = 1;
+  uint32 maxSampleRate = 2;
+  uint32 maxChannels = 3;
+  boolean nonE164 = 4;
+  boolean forceCbr = 5;
+  boolean tnt = 6;
+}
+
+message CreateCallRequest {
+  string targetURI = 1;
+}
+
+message CreateCallResponse {
+  string callID = 1;
+}
+
+message Event {
+  EventType type = 1;
+  Direction direction = 2;
+  uint32 seqnum = 3;
+  uint32 timestamp = 4;
+  boolean ended = 5;
+  //TBD timestamp = 6;
+  string tntDestination = 7;
+  string migrateToUrl = 8;
+}
+
+message GetEventStreamRequest {
+  string callID = 1;
+}
+
+message SendEventRequest {
+  string callID = 1;
+  Event event = 2;
+}
