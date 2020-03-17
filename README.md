@@ -35,16 +35,16 @@ go build .
 
 ### H3 Sender -> H3 Receiver
 ```
-./rip_client --mode=pull  --xport=h3 (receiver)
+./ript_client --mode=pull  --xport=h3 (receiver)
 
-./rip_client --mode=push --xport=h3 (sender)
+./ript_client --mode=push --xport=h3 (sender)
 ```
 
 ### WS Sender -> H3 Receiver
 ```
-./rip_client --mode=pull  --xport=h3 (receiver)
+./ript_client --mode=pull  --xport=h3 (receiver)
 
-./rip_client --mode=push --xport=ws (sender)
+./ript_client --mode=push --xport=ws (sender)
 ```
 
 
