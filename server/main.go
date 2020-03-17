@@ -1,33 +1,26 @@
 package main
 
 import (
-	"context"
 	"flag"
-	"log"
-	"net"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
+	"fmt"
+	"github.com/WhatIETF/goRIPT/ript_net"
 )
-
-var (
-	addr = flag.String("addr", ":50051", "Network host:port to listen on for gRPC connections.")
-)
-
-type server struct{}
 
 func main() {
+	var port int
+	flag.IntVar(&port, "port", 6121, "port on which to listen")
 	flag.Parse()
 
-	lis, err := net.Listen("tcp", *addr)
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-	s := grpc.NewServer()
-	pb.RegisterGreeterServer(s, &server{})
-	// Register reflection service on gRPC server.
-	reflection.Register(s)
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
-	}
+	router := ript_net.NewRouter("ript-relay")
+
+	// h3 Server
+	h3Server := ript_net.NewQuicFaceServer(6121)
+	router.AddFaceFactory(h3Server)
+
+	// ws Server
+	wsServer := ript_net.NewWebSocketFaceServer(8080)
+	router.AddFaceFactory(wsServer)
+
+	fmt.Printf("Router started and serving on port %d\n", port)
+	select {}
 }
