@@ -21,8 +21,10 @@ Note: Current code shows how h3 POST can be used to send/recv media for h3 trans
 
 ## Prerequisites
 
-1. quic-go (go get tgithub.com/lucas-clemente/quic-go)
+1. quic-g: Intsall with
+   ```go get github.com/lucas-clemente/quic-go ```
 
+2. you will need this package in your gopath so it is found
 
 ## Run server:
    ``` go run server/main.go ```
