@@ -156,15 +156,22 @@ func (c *QuicClientFace) Send(pkt ript_net.Packet) error {
 		return err
 	}
 
-	res, err := c.client.Post(mediaPushUrl, "application/json; charset=utf-8", buf)
+	req, err := http.NewRequest(http.MethodPut, mediaPushUrl, buf)
 	if err != nil {
-		log.Errorf("ript_client:send: POST error [%v]\n", err)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+
+	res, err := c.client.Do(req)
+	if err != nil {
+		log.Errorf("ript_client:send: PUT error [%v]\n", err)
 		panic(err)
 	}
 
 	if res.StatusCode != 200 {
 		return fmt.Errorf("ript_client:send: post media id [%d] failed [%v]", pkt.Content.Id, res)
 	}
+
 	log.Printf("ript_client:send: posted media fragment Id [%d], len [%d]", pkt.Content.Id, len(pkt.Content.Content))
 	return nil
 }
