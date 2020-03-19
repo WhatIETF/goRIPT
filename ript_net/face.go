@@ -1,12 +1,14 @@
 package ript_net
 
+import "github.com/WhatIETF/goRIPT/api"
+
 //  Abstract interface for the underlying transport
 
 type Face interface {
-	Name() FaceName
-	Send(pkt Packet) error
+	Name() api.FaceName
+	Send(pkt api.Packet) error
 	Read()
-	SetReceiveChan(recv chan PacketEvent)
+	SetReceiveChan(recv chan api.PacketEvent)
 	Close(err error)
 	OnClose() chan error
 	CanStream() bool

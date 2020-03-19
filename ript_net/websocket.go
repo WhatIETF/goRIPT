@@ -3,6 +3,7 @@ package ript_net
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/WhatIETF/goRIPT/api"
 	"log"
 	"net/http"
 
@@ -12,7 +13,7 @@ import (
 type WebSocketFace struct {
 	conn      *websocket.Conn
 	haveRecv  bool
-	recvChan  chan PacketEvent
+	recvChan  chan api.PacketEvent
 	closeChan chan error
 	closed    bool
 }
@@ -51,7 +52,7 @@ func (ws *WebSocketFace) Read() {
 			break
 		}
 
-		var pkt Packet
+		var pkt api.Packet
 		err = json.Unmarshal(message, &pkt)
 		if err != nil {
 			break
@@ -62,7 +63,7 @@ func (ws *WebSocketFace) Read() {
 			continue
 		}
 
-		ws.recvChan <- PacketEvent{
+		ws.recvChan <- api.PacketEvent{
 			Sender: ws.Name(),
 			Packet: pkt,
 		}
@@ -74,11 +75,11 @@ func (ws *WebSocketFace) Read() {
 	}
 }
 
-func (ws *WebSocketFace) Name() FaceName {
-	return FaceName(ws.conn.RemoteAddr().String())
+func (ws *WebSocketFace) Name() api.FaceName {
+	return api.FaceName(ws.conn.RemoteAddr().String())
 }
 
-func (ws *WebSocketFace) Send(pkt Packet) error {
+func (ws *WebSocketFace) Send(pkt api.Packet) error {
 	if ws.closed {
 		return fmt.Errorf("Cannot send on closed channel")
 	}
@@ -90,7 +91,7 @@ func (ws *WebSocketFace) Send(pkt Packet) error {
 	return ws.conn.WriteMessage(websocket.TextMessage, enc)
 }
 
-func (ws *WebSocketFace) SetReceiveChan(recv chan PacketEvent) {
+func (ws *WebSocketFace) SetReceiveChan(recv chan api.PacketEvent) {
 	ws.haveRecv = true
 	ws.recvChan = recv
 }
@@ -134,7 +135,7 @@ func NewWebSocketClientFace(url string) (*WebSocketFace, error) {
 
 type WebSocketFaceServer struct {
 	*http.Server
-	recvChan chan PacketEvent
+	recvChan chan api.PacketEvent
 	feedChan chan Face
 }
 
