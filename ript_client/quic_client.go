@@ -2,26 +2,34 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
-	"fmt"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/WhatIETF/goRIPT/api"
+	"github.com/WhatIETF/goRIPT/common"
 	"github.com/labstack/gommon/log"
 	"github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/http3"
-	"github.com/WhatIETF/goRIPT/common"
-	"github.com/WhatIETF/goRIPT/ript_net"
 	"io"
 	"net/http"
 	"time"
 )
 
+const (
+	registerHandlerUrl = "https://localhost:6121/.well-known/ript/v1/providerTgs/trunk123/handlers"
+
+	mediaPushUrl = "https://localhost:6121/media/forward"
+	mediaPullUrl = "https://localhost:6121/media/reverse"
+)
+
 type QuicClientFace struct {
 	client *http.Client
-	name ript_net.FaceName
-	recvChan chan ript_net.PacketEvent
+	name api.FaceName
+	recvChan chan api.PacketEvent
 	haveRecv bool
-	sendChan chan ript_net.Packet
+	sendChan chan api.Packet
 	closeChan chan error
 	haveClosed bool
 	inboundContentId int32
@@ -77,8 +85,8 @@ func NewQuicClientFace() *QuicClientFace {
 	}
 }
 
-func (c *QuicClientFace) Name() ript_net.FaceName {
-	return ript_net.FaceName(c.name)
+func (c *QuicClientFace) Name() api.FaceName {
+	return api.FaceName(c.name)
 }
 
 func (c *QuicClientFace) CanStream() bool {
@@ -86,97 +94,94 @@ func (c *QuicClientFace) CanStream() bool {
 }
 
 func (c *QuicClientFace) Read() {
-	// read the packet from the remote end and pass on the received packet
-	// to the channel that process it
-	mediaPullUrl := "https://localhost:6121/media/reverse"
-	log.Printf("ript_client:read: requesting content for Id [%d]", c.inboundContentId)
-	req := ript_net.Packet{
-		Type: ript_net.ContentRequestPacket,
-		ContentRequest: ript_net.ContentRequestMessage{
-			To: "trunk123",
-			Id: c.inboundContentId,
-		},
-	}
-
-	buf := new(bytes.Buffer)
-	err := json.NewEncoder(buf).Encode(req)
-	if err != nil {
-		log.Errorf("ript_client:read: marshal error [%v]", err)
-		// todo: don't panic and report error for app to handle
-		panic(err)
-	}
-
-	res, err := c.client.Post(mediaPullUrl, "application/json; charset=utf-8", buf)
-	if err != nil {
-		log.Errorf("ript_client:read: media pull error [%v]", err)
-		return
-	}
-
-	defer res.Body.Close()
-
-	if res.StatusCode != 200 {
-		log.Errorf("ript_client:read: non 200 response [%d]", res.StatusCode)
-		// todo: retry the request if a given id is not found .. slow sender perhaps ?
-		return
-	}
-
-	body := &bytes.Buffer{}
-	_, err = io.Copy(body, res.Body)
-	if err != nil {
-		log.Errorf("ript_client:read: error retrieving the body: [%v]", err)
-		// todo: don't panic and report error for app to handle
-		panic(err)
-	}
-
-	var mediaPacket ript_net.Packet
-	err = json.Unmarshal(body.Bytes(), &mediaPacket)
-	if err != nil {
-		log.Errorf("ript_client: content unmarshal [%v]", err)
-		// todo: don't panic and report error for app to handle
-		panic(err)
-	}
-
-	log.Printf("ript_client:read: received content Id [%d], len [%d] bytes",
-		mediaPacket.Content.Id, len(mediaPacket.Content.Content))
-
-	c.recvChan <- ript_net.PacketEvent{
-		Packet: mediaPacket,
-	}
-
-	c.inboundContentId = mediaPacket.Content.Id + 1
+	// .....
 }
 
 
-func (c *QuicClientFace) Send(pkt ript_net.Packet) error {
-	mediaPushUrl := "https://localhost:6121/media/forward"
+func (c *QuicClientFace) Send(pkt api.Packet) error {
 	buf := new(bytes.Buffer)
-	err := json.NewEncoder(buf).Encode(pkt)
+	var err error
+
+	err = json.NewEncoder(buf).Encode(pkt)
 	if err != nil {
 		log.Errorf("ript_client:send: marshal error")
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPut, mediaPushUrl, buf)
+	var res *http.Response
+	var responsePacket api.Packet
+	err = nil
+	switch pkt.Type {
+	case api.ContentPacket:
+		if pkt.Filter == api.ContentFilterMediaReverse {
+			// pull media by invoking GET operation
+			res, err = c.client.Get(mediaPullUrl)
+			if err != nil || res.StatusCode != 200 {
+				break
+			}
+
+			responsePacket, err = httpResponseToRiptPacket(res)
+			if err != nil {
+				break
+			}
+
+			log.Printf("ript_client:mediapull: received content Id [%d], len [%d] bytes",
+				responsePacket.Content.Id, len(responsePacket.Content.Content))
+
+			// forward the packet for further processing
+			c.recvChan <- api.PacketEvent{
+				Packet: responsePacket,
+			}
+
+			c.inboundContentId = responsePacket.Content.Id + 1
+
+		} else {
+			// push media by posting captured content
+			req, err := http.NewRequest(http.MethodPut, mediaPushUrl, buf)
+			if err != nil {
+				break
+			}
+			req.Header.Set("Content-Type", "application/json; charset=utf-8")
+			res, err = c.client.Do(req)
+			if err != nil || res.StatusCode != 200 {
+				break
+			}
+			log.Printf("ript_client:send: posted media fragment Id [%d], len [%d]", pkt.Content.Id,
+				len(pkt.Content.Content))
+		}
+
+	case api.RegisterHandlerPacket:
+		res, err = c.client.Post(registerHandlerUrl, "application/json; charset=utf-8", buf)
+		if err != nil || res.StatusCode != 200 {
+			break
+		}
+
+		responsePacket, err = httpResponseToRiptPacket(res)
+		if err != nil {
+			break
+		}
+
+		log.Printf("HandlerRegistration response [%v]", res)
+
+		// forward the packet for further processing
+		c.recvChan <- api.PacketEvent{
+			Packet: responsePacket,
+		}
+	}
+
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-
-	res, err := c.client.Do(req)
-	if err != nil {
-		log.Errorf("ript_client:send: PUT error [%v]\n", err)
-		panic(err)
-	}
 
 	if res.StatusCode != 200 {
-		return fmt.Errorf("ript_client:send: post media id [%d] failed [%v]", pkt.Content.Id, res)
+		return fmt.Errorf("ript_client:send: failed status: [%v]", res.StatusCode)
 	}
 
-	log.Printf("ript_client:send: posted media fragment Id [%d], len [%d]", pkt.Content.Id, len(pkt.Content.Content))
+	res.Body.Close()
 	return nil
 }
 
-func (c *QuicClientFace) SetReceiveChan(recv chan ript_net.PacketEvent) {
+func (c *QuicClientFace) SetReceiveChan(recv chan api.PacketEvent) {
 	c.haveRecv = true
 	c.recvChan = recv
 }
@@ -194,9 +199,34 @@ func (c *QuicClientFace) Close(err error) {
 	if resp.StatusCode != 200 {
 		fmt.Printf("ript_client: leave failed. Status code %v", resp.StatusCode)
 	}
-
 }
 
 func (c *QuicClientFace) OnClose() chan error {
 	return c.closeChan
+}
+
+///////
+//// helpers
+///////
+
+func httpResponseToRiptPacket(response *http.Response) (api.Packet , error) {
+	if response == nil {
+		return api.Packet{}, errors.New("ript_client: invalid response object")
+	}
+
+	body := &bytes.Buffer{}
+	_, err := io.Copy(body, response.Body)
+	if err != nil {
+		log.Errorf("ript_client: error retrieving the body: [%v]", err)
+		return  api.Packet{}, err
+	}
+
+	var packet api.Packet
+	err = json.Unmarshal(body.Bytes(), &packet)
+	if err != nil {
+		log.Errorf("ript_client: content unmarshal [%v]", err)
+		return api.Packet{}, err
+	}
+
+	return packet, nil
 }
