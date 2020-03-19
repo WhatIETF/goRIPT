@@ -11,7 +11,8 @@ func main() {
 	flag.IntVar(&port, "port", 6121, "port on which to listen")
 	flag.Parse()
 
-	router := ript_net.NewRouter("ript-relay")
+	service := ript_net.NewRIPTService()
+	router := ript_net.NewRouter("ript-relay", service)
 
 	// h3 Server
 	h3Server := ript_net.NewQuicFaceServer(6121)

@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/WhatIETF/goRIPT/api"
+	"github.com/WhatIETF/goRIPT/common"
+	"github.com/gorilla/mux"
 	"github.com/labstack/gommon/log"
 	"github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/http3"
-	"github.com/WhatIETF/goRIPT/common"
 	"io"
 	"net/http"
+	"os"
+	"time"
 )
 
 // quic based transport
@@ -18,9 +22,9 @@ import (
 type QuicFace struct {
 	haveRecv  bool
 	// inbound face to router for processsing
-	recvChan chan PacketEvent
+	recvChan chan api.PacketEvent
 	// app/router to face for outbound transport
-	contentChan chan Packet
+	contentChan chan api.Packet
 	closeChan chan error
 	closed    bool
 	name string
@@ -35,18 +39,18 @@ func (f *QuicFace) Read() {
 	// nothing to implement  unless we
 }
 
-func (f *QuicFace) Name() FaceName {
-	return FaceName(f.name)
+func (f *QuicFace) Name() api.FaceName {
+	return api.FaceName(f.name)
 }
 
 
-func (f *QuicFace) Send(pkt Packet) error {
+func (f *QuicFace) Send(pkt api.Packet) error {
 	log.Printf("send: passing on the content [%d] to content chan, face [%s]", pkt.Content.Id, f.name)
 	f.contentChan <- pkt
 	return nil
 }
 
-func (f *QuicFace) SetReceiveChan(recv chan PacketEvent) {
+func (f *QuicFace) SetReceiveChan(recv chan api.PacketEvent) {
 	f.haveRecv = true
 	f.recvChan = recv
 }
@@ -68,7 +72,7 @@ func NewQuicFace(name string) *QuicFace {
 	q := &QuicFace {
 		haveRecv:  false,
 		closeChan: make(chan error, 1),
-		contentChan: make(chan Packet, 1),
+		contentChan: make(chan api.Packet, 1),
 		closed:    false,
 		name:  name,
 	}
@@ -89,35 +93,8 @@ type QuicFaceServer struct {
 
 
 func HandleMediaPull(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
-	// 1. let the router's recv chan know of the pull request
-	// 2. await response from the router
-	/*
-	body := &bytes.Buffer{}
-	_, err := io.Copy(body, request.Body)
-	if err != nil {
-		log.Errorf("Error retrieving the body: [%v]", err)
-		writer.WriteHeader(400)
-		return
-	}
-	var pkt Packet
-	err = json.Unmarshal(body.Bytes(), &pkt)
-	if err != nil {
-		log.Errorf("Error unmarshal [%v]", err)
-		writer.WriteHeader(400)
-		return
-	}
-	log.Printf("mediaPull: forwarding [%v] to router", pkt)
-	face.recvChan <- PacketEvent{
-		Sender: face.Name(),
-		Packet: pkt,
-	}
-	*/
-
+	// await media packet
 	select {
-	/*case <-time.After(250 * time.Millisecond):
-		log.Errorf("mediaPull no content received .. ")
-		writer.WriteHeader(404)
-		return*/
 	case resPkt := <- face.contentChan:
 		log.Printf("mediaPull [%s] got content Id [%d] , len [%d] to send out", face.Name(),
 			resPkt.Content.Id, len(resPkt.Content.Content))
@@ -142,23 +119,75 @@ func HandleMediaPush(face *QuicFace, writer http.ResponseWriter, request *http.R
 		writer.WriteHeader(400)
 		return
 	}
-	var pkt Packet
+	var pkt api.Packet
 	err = json.Unmarshal(body.Bytes(), &pkt)
 	if err != nil {
 		log.Printf("Error unmarshal [%v]", err)
 		writer.WriteHeader(400)
 		return
 	}
-	face.recvChan <- PacketEvent{
+	face.recvChan <- api.PacketEvent{
 		Sender: face.Name(),
 		Packet: pkt,
 	}
 	writer.WriteHeader(200)
 }
 
+func HandlerRegistration(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
+	log.Printf("Handler registration from [%v]", request)
+	// extract trunkGroupId
+	params := mux.Vars(request)
+	tgId := params["trunkGroupId"]
+	if len(tgId) == 0 {
+		log.Errorf("missing trunkGroupId")
+		writer.WriteHeader(400)
+		return
+	}
+
+	// extract handler info from the body
+	body := &bytes.Buffer{}
+	_, err := io.Copy(body, request.Body)
+	if err != nil {
+		log.Errorf("Error retrieving the body: [%v]", err)
+		writer.WriteHeader(400)
+		return
+	}
+	var pkt api.Packet
+	err = json.Unmarshal(body.Bytes(), &pkt)
+	if err != nil {
+		log.Printf("Error unmarshal [%v]", err)
+		writer.WriteHeader(400)
+		return
+	}
+
+	log.Printf("HandlerRegistration: trunk [%s], Request [%v]", tgId, pkt)
+
+	// pass the packet to router
+	face.recvChan <- api.PacketEvent{
+		Sender: face.Name(),
+		Packet: pkt,
+	}
+
+	// await response or timeout
+	select {
+	case <-time.After(2 * time.Second):
+		log.Errorf("handlerRegistration: no content received .. ")
+		writer.WriteHeader(404)
+		return
+	case resPkt := <- face.contentChan:
+		log.Printf("handlerRegistration [%s] got content [%v]", face.Name(), resPkt)
+		enc, err := json.Marshal(resPkt)
+		if err != nil {
+			writer.WriteHeader(400)
+			return
+		}
+		writer.Write(enc)
+	}
+}
+
 // Mux handler for routing various h3 endpoints
 func setupHandler(server *QuicFaceServer) http.Handler {
-	mux := http.NewServeMux()
+	router := mux.NewRouter()
 
 	mediaPullFn := func(w http.ResponseWriter, r *http.Request) {
 		//  get the face
@@ -181,7 +210,6 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 		server.feedChan <- face
 		server.faceMap[r.RemoteAddr] = face
 		w.WriteHeader(200)
-		return
 	}
 
 	leaveFn := func(w http.ResponseWriter, r *http.Request) {
@@ -194,22 +222,46 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 			delete(server.faceMap, r.RemoteAddr)
 		}
 		w.WriteHeader(200)
-		return
+	}
+
+	regHandlerFn := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("register handler from  [%v]", r.RemoteAddr)
+		//  get the face
+		face := server.faceMap[r.RemoteAddr]
+		HandlerRegistration(face, w, r)
 	}
 
 
-	mux.HandleFunc("/media/forward", mediaPushFn)
-	mux.HandleFunc("/media/reverse", mediaPullFn)
-	mux.HandleFunc("/media/join", joinFn)
-	mux.HandleFunc("/media/leave", leaveFn)
+	// todo: tg discovery
+	//mux.HandleFunc("/.well-known/ript/v1/providerTgs", tgDiscFn)
 
-	return mux
+	// handler registrations
+	router.HandleFunc("/.well-known/ript/v1/providerTgs/{trunkGroupId}/handlers",
+		regHandlerFn).Methods(http.MethodPost)
+
+	router.HandleFunc("/media/join", joinFn)
+	router.HandleFunc("/media/leave", leaveFn)
+
+	// media byways
+	router.HandleFunc("/media/forward", mediaPushFn).Methods(http.MethodPut)
+	router.HandleFunc("/media/reverse", mediaPullFn).Methods(http.MethodGet)
+
+	return router
 }
 
 func NewQuicFaceServer(port int) *QuicFaceServer {
 	// rest of the config seems sane
 	quicConf := &quic.Config{
 		KeepAlive: true,
+	}
+	quicConf.GetLogWriter = func(connID []byte) io.WriteCloser {
+		filename := fmt.Sprintf("client_%x.qlog", connID)
+		f, err := os.Create(filename)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("Creating qlog file %s.\n", filename)
+		return f
 	}
 
 	url := fmt.Sprintf("localhost:%d", port)

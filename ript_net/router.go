@@ -1,79 +1,41 @@
 package ript_net
 
 import (
-	"crypto/sha1"
 	"log"
 	"sync"
+
+	"github.com/WhatIETF/goRIPT/api"
 )
-
-const (
-	ContentPacket        PacketType = 1
-	ContentRequestPacket PacketType = 2
-)
-
-type FaceName string
-type PacketType byte
-type DeliveryAddress string
-type ContentHash []byte
-
-type ContentMessage struct {
-	To DeliveryAddress
-	Id int32
-	Content []byte
-}
-
-func (msg ContentMessage) Hash() ContentHash {
-	h := sha1.New()
-	h.Write([]byte(msg.Content))
-	return ContentHash(h.Sum(nil))
-}
-
-type ContentRequestMessage struct {
-	To DeliveryAddress
-	Id int32
-}
-
-type Packet struct {
-	Type PacketType
-	Content ContentMessage
-	ContentRequest ContentRequestMessage
-}
-
-type PacketEvent struct {
-	Sender FaceName
-	Packet Packet
-}
-
 
 //// Packet Cache
 // todo(suhas): implement cache truncation
 type Cache struct {
 	sync.Mutex
 	currentId int32
-	cache map[DeliveryAddress]map[int32]ContentMessage
+	cache map[api.DeliveryAddress]map[int32]api.ContentMessage
 }
 
 func newCache() *Cache {
 	return &Cache{
-		cache: map[DeliveryAddress]map[int32]ContentMessage{},
+		cache: map[api.DeliveryAddress]map[int32]api.ContentMessage{},
 	}
 }
 
-func (c *Cache) Add(msg ContentMessage) {
+func (c *Cache) Add(msg api.ContentMessage) {
 	c.Lock()
 	defer c.Unlock()
 	_, ok := c.cache[msg.To]
 	if !ok {
-		c.cache[msg.To] = map[int32]ContentMessage{}
+		c.cache[msg.To] = map[int32]api.ContentMessage{}
 	}
 	c.currentId = msg.Id
 	c.cache[msg.To][c.currentId] = msg
 }
 
-func (c Cache) Get(addr DeliveryAddress, id int32) (ContentMessage, bool) {
+func (c Cache) Get(addr api.DeliveryAddress, id int32) (api.ContentMessage, bool) {
 	messages := c.cache[addr]
 	if len(messages) == 0 {
-		return ContentMessage{}, false
+		return api.ContentMessage{}, false
 	}
 
 	if id == -1 {
@@ -81,14 +43,14 @@ func (c Cache) Get(addr DeliveryAddress, id int32) (ContentMessage, bool) {
 	}
 	msg := c.cache[addr][id]
 	if len(msg.Content) == 0 {
-		return ContentMessage{}, false
+		return api.ContentMessage{}, false
 	}
 
 	return msg, true
 }
 
 func (c Cache) Flush() {
-	c.cache = map[DeliveryAddress]map[int32]ContentMessage{}
+	c.cache = map[api.DeliveryAddress]map[int32]api.ContentMessage{}
 }
 
 /////
@@ -96,17 +58,19 @@ func (c Cache) Flush() {
 type Router struct {
 	name     string
 	faceLock sync.Mutex
-	faces    map[FaceName]Face
-	recvChan chan PacketEvent
+	faces    map[api.FaceName]Face
+	recvChan chan api.PacketEvent
 	cache *Cache
+	service *RIPTService
 }
 
-func NewRouter(name string) *Router {
+func NewRouter(name string, service *RIPTService) *Router {
 	r := &Router{
 		name:     name,
-		faces:    map[FaceName]Face{},
-		recvChan: make(chan PacketEvent, 200),
+		faces:    map[api.FaceName]Face{},
+		recvChan: make(chan api.PacketEvent, 200),
 		cache: newCache(),
+		service: service,
 	}
 	go r.route()
 	return r
@@ -117,7 +81,7 @@ func (r *Router) route() {
 		log.Printf("[%s] received from [%s], packet %v", r.name, evt.Sender, evt.Packet.Type)
 
 		switch evt.Packet.Type {
-		case ContentPacket:
+		case api.ContentPacket:
 			// add to cache
 			// todo: this is blind broadcast, needs to be optimized
 			// Forward the packet on all the faces (except sender)
@@ -133,7 +97,7 @@ func (r *Router) route() {
 			}
 			continue
 
-		case ContentRequestPacket:
+		case api.ContentRequestPacket:
 			addr := evt.Packet.ContentRequest.To
 			id := evt.Packet.ContentRequest.Id
 			log.Printf("Looking cachne for content id [%d]", id)
@@ -144,18 +108,32 @@ func (r *Router) route() {
 			}
 
 			// send the packet to the requestor
-			packet := Packet{
-				Type: ContentPacket,
+			packet := api.Packet{
+				Type: api.ContentPacket,
 				Content: msg,
 			}
 
-			log.Printf("[%s] forwarding Content Id [%d], len %d on [%s]\n", r.name, msg.Id, len(msg.Content), evt.Sender)
-			log.Printf("raw content [%v]", msg)
+			log.Printf("[%s] forwarding Content Id [%d], len %d on [%s]\n", r.name, msg.Id,
+				len(msg.Content), evt.Sender)
 
 			err := r.faces[evt.Sender].Send(packet)
 			if err != nil {
 				r.RemoveFace(r.faces[evt.Sender], err)
 			}
+		case api.RegisterHandlerPacket:
+			// handler registration
+			// todo: handle error
+			response, _ := r.service.registerHandler(evt.Packet.RegisterHandler)
+			packet :=  api.Packet{
+				Type: api.RegisterHandlerPacket,
+				RegisterHandler: response,
+			}
+
+			err := r.faces[evt.Sender].Send(packet)
+			if err != nil {
+				r.RemoveFace(r.faces[evt.Sender], err)
+			}
+
 		default:
 			log.Fatalf("unknown packet type [%s]", evt.Packet.Type)
 		}

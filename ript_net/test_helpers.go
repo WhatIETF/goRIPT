@@ -1,6 +1,7 @@
 package ript_net
 
 import (
+	"github.com/WhatIETF/goRIPT/api"
 	"net"
 	"reflect"
 	"testing"
@@ -19,13 +20,13 @@ func forceInboundPrompt() {
 }
 
 func testFaceSend(t *testing.T, a, b Face) {
-	pkt := Packet{
-		Content: ContentMessage{
+	pkt := api.Packet{
+		Content: api.ContentMessage{
 			Content: []byte("test"),
 		},
 	}
 
-	recvB := make(chan PacketEvent, 1)
+	recvB := make(chan api.PacketEvent, 1)
 	b.SetReceiveChan(recvB)
 
 	err := a.Send(pkt)
