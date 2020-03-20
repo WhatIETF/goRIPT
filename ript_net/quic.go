@@ -2,6 +2,7 @@ package ript_net
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,8 +14,9 @@ import (
 	"github.com/lucas-clemente/quic-go/http3"
 	"io"
 	"net/http"
-	"os"
 	"time"
+
+	"golang.org/x/crypto/acme/autocert"
 )
 
 // quic based transport
@@ -23,8 +25,10 @@ type QuicFace struct {
 	haveRecv  bool
 	// inbound face to router for processsing
 	recvChan chan api.PacketEvent
-	// app/router to face for outbound transport
+	// app/router to face for outbound transport/handlers
 	contentChan chan api.Packet
+	// channel for trunk discovery
+	tgDiscChan chan api.Packet
 	closeChan chan error
 	closed    bool
 	name string
@@ -45,8 +49,14 @@ func (f *QuicFace) Name() api.FaceName {
 
 
 func (f *QuicFace) Send(pkt api.Packet) error {
-	log.Printf("send: passing on the content [%d] to content chan, face [%s]", pkt.Content.Id, f.name)
-	f.contentChan <- pkt
+	switch pkt.Type {
+	case api.TrunkGroupDiscoveryPacket:
+		log.Printf("send: passing on the content to trunk discovery chan, face [%s]",  f.name)
+		f.tgDiscChan <- pkt
+	default:
+		log.Printf("send: passing on the content to general contnet chan, face [%s]",  f.name)
+		f.contentChan <- pkt
+	}
 	return nil
 }
 
@@ -73,6 +83,7 @@ func NewQuicFace(name string) *QuicFace {
 		haveRecv:  false,
 		closeChan: make(chan error, 1),
 		contentChan: make(chan api.Packet, 1),
+		tgDiscChan: make(chan api.Packet, 1),
 		closed:    false,
 		name:  name,
 	}
@@ -185,6 +196,33 @@ func HandlerRegistration(face *QuicFace, writer http.ResponseWriter, request *ht
 	}
 }
 
+
+func HandleTgDiscovery(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
+	// query service for list of trunk groups available
+	face.recvChan <- api.PacketEvent{
+		Sender: face.Name(),
+		Packet: api.Packet{
+			Type: api.TrunkGroupDiscoveryPacket,
+		},
+	}
+
+	// await response or timeout
+	select {
+	case <-time.After(2 * time.Second):
+		log.Errorf("HandleTgDiscovery: no content received .. ")
+		writer.WriteHeader(404)
+		return
+	case resPkt := <- face.tgDiscChan:
+		log.Printf("HandleTgDiscovery [%s] got content [%v]", face.Name(), resPkt)
+		enc, err := json.Marshal(resPkt)
+		if err != nil {
+			writer.WriteHeader(400)
+			return
+		}
+		writer.Write(enc)
+	}
+}
+
 // Mux handler for routing various h3 endpoints
 func setupHandler(server *QuicFaceServer) http.Handler {
 	router := mux.NewRouter()
@@ -232,11 +270,19 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 	}
 
 
-	// todo: tg discovery
-	//mux.HandleFunc("/.well-known/ript/v1/providerTgs", tgDiscFn)
+	tgDiscFn := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("trunk group discovery  from  [%v]", r.RemoteAddr)
+		//  get the face
+		face := server.faceMap[r.RemoteAddr]
+		HandleTgDiscovery(face, w, r)
+	}
+
+
+	fmt.Printf("trunkDiscoveryUrl [%s]", baseUrl+"/providerTgs")
+	router.HandleFunc(baseUrl+"/providertgs", tgDiscFn)
 
 	// handler registrations
-	router.HandleFunc("/.well-known/ript/v1/providerTgs/{trunkGroupId}/handlers",
+	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/handlers",
 		regHandlerFn).Methods(http.MethodPost)
 
 	router.HandleFunc("/media/join", joinFn)
@@ -249,11 +295,36 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 	return router
 }
 
-func NewQuicFaceServer(port int) *QuicFaceServer {
+
+func NewQuicFaceServer(port int,  devMode bool) *QuicFaceServer {
+	var server *http.Server
+	url := fmt.Sprintf("localhost:%d", port)
+
+	if !devMode {
+		domain := "ietf107.ript-dev.com"
+		cacheDir := "."
+		certManager := autocert.Manager{
+			Prompt: autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(domain),
+		}
+		certManager.Cache = autocert.DirCache(cacheDir)
+
+		server = &http.Server{
+			Addr: ":https",
+			TLSConfig: &tls.Config{
+				GetCertificate: certManager.GetCertificate,
+			},
+		}
+	} else {
+		server = &http.Server{Handler: nil, Addr: url}
+	}
+
 	// rest of the config seems sane
 	quicConf := &quic.Config{
 		KeepAlive: true,
 	}
+
+	/*
 	quicConf.GetLogWriter = func(connID []byte) io.WriteCloser {
 		filename := fmt.Sprintf("client_%x.qlog", connID)
 		f, err := os.Create(filename)
@@ -262,12 +333,11 @@ func NewQuicFaceServer(port int) *QuicFaceServer {
 		}
 		log.Printf("Creating qlog file %s.\n", filename)
 		return f
-	}
+	}*/
 
-	url := fmt.Sprintf("localhost:%d", port)
 	quicServer := &QuicFaceServer{
 		Server: &http3.Server{
-			Server:     &http.Server{Handler: nil, Addr: url},
+			Server:     server,
 			QuicConfig: quicConf,
 		},
 		feedChan: make(chan Face, 10),
@@ -276,7 +346,14 @@ func NewQuicFaceServer(port int) *QuicFaceServer {
 
 	handler := setupHandler(quicServer)
 	quicServer.Handler = handler
-	go quicServer.ListenAndServeTLS(common.GetCertificatePaths())
+	if !devMode {
+		log.Printf("Starting Server in Prod Mode")
+		go quicServer.ListenAndServeTLS("", "")
+	} else {
+		log.Printf("Starting Server in Dev Mode")
+		go quicServer.ListenAndServeTLS(common.GetCertificatePaths())
+	}
+
 	log.Info("New Quic Server created.\n")
 	return quicServer
 }

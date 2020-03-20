@@ -18,7 +18,9 @@ import (
 )
 
 const (
-	registerHandlerUrl = "https://localhost:6121/.well-known/ript/v1/providerTgs/trunk123/handlers"
+	baseUri = "https://localhost:6121"
+	trunkDiscoveryUrl = baseUri+"/.well-known/ript/v1/providertgs"
+	registerHandlerUrl = baseUri+"/.well-known/ript/v1/providertgs/trunk123/handlers"
 
 	mediaPushUrl = "https://localhost:6121/media/forward"
 	mediaPullUrl = "https://localhost:6121/media/reverse"
@@ -26,6 +28,7 @@ const (
 
 type QuicClientFace struct {
 	client *http.Client
+	serverInfo *riptProviderInfo
 	name api.FaceName
 	recvChan chan api.PacketEvent
 	haveRecv bool
@@ -35,7 +38,7 @@ type QuicClientFace struct {
 	inboundContentId int32
 }
 
-func NewQuicClientFace() *QuicClientFace {
+func NewQuicClientFace(serverInfo *riptProviderInfo) *QuicClientFace {
 	pool, err := x509.SystemCertPool()
 	if err != nil {
 		fmt.Printf("cert pool creation error")
@@ -77,11 +80,11 @@ func NewQuicClientFace() *QuicClientFace {
 
 	return &QuicClientFace {
 		client: client,
+		serverInfo: serverInfo,
 		haveRecv: false,
 		haveClosed: false,
 		closeChan: make(chan error, 1),
 		inboundContentId: -1,
-
 	}
 }
 
@@ -151,7 +154,8 @@ func (c *QuicClientFace) Send(pkt api.Packet) error {
 		}
 
 	case api.RegisterHandlerPacket:
-		res, err = c.client.Post(registerHandlerUrl, "application/json; charset=utf-8", buf)
+		url := c.serverInfo.baseUrl + c.serverInfo.getTrunkGroupUri() + "/handlers"
+		res, err = c.client.Post(url, "application/json; charset=utf-8", buf)
 		if err != nil || res.StatusCode != 200 {
 			break
 		}
@@ -162,6 +166,24 @@ func (c *QuicClientFace) Send(pkt api.Packet) error {
 		}
 
 		log.Printf("HandlerRegistration response [%v]", res)
+
+		// forward the packet for further processing
+		c.recvChan <- api.PacketEvent{
+			Packet: responsePacket,
+		}
+	case api.TrunkGroupDiscoveryPacket:
+		fmt.Printf("trunkDiscovery url [%s]", trunkDiscoveryUrl)
+		res, err = c.client.Get(trunkDiscoveryUrl)
+		if err != nil || res.StatusCode != 200 {
+			break
+		}
+
+		responsePacket, err = httpResponseToRiptPacket(res)
+		if err != nil {
+			break
+		}
+
+		log.Printf("TrunkGroupDiscoveryy response [%v]", res)
 
 		// forward the packet for further processing
 		c.recvChan <- api.PacketEvent{

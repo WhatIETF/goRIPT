@@ -97,29 +97,19 @@ func (r *Router) route() {
 			}
 			continue
 
-		case api.ContentRequestPacket:
-			addr := evt.Packet.ContentRequest.To
-			id := evt.Packet.ContentRequest.Id
-			log.Printf("Looking cachne for content id [%d]", id)
-			msg, ok := r.cache.Get(addr, id)
-			if !ok {
-				log.Printf("no cached media found for [%v]", addr)
-				continue
+		case api.TrunkGroupDiscoveryPacket:
+			response := r.service.listTrunkGroups()
+			packet :=  api.Packet{
+				Type: api.TrunkGroupDiscoveryPacket,
+				TrunkGroupsInfo: response,
 			}
-
-			// send the packet to the requestor
-			packet := api.Packet{
-				Type: api.ContentPacket,
-				Content: msg,
-			}
-
-			log.Printf("[%s] forwarding Content Id [%d], len %d on [%s]\n", r.name, msg.Id,
-				len(msg.Content), evt.Sender)
 
 			err := r.faces[evt.Sender].Send(packet)
 			if err != nil {
 				r.RemoveFace(r.faces[evt.Sender], err)
 			}
+			continue
+
 		case api.RegisterHandlerPacket:
 			// handler registration
 			// todo: handle error

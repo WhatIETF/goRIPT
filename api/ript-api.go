@@ -1,26 +1,16 @@
 package api
 
-import "crypto/sha1"
-
 // API definitions for ript
 // TODO: Use RAML/Swagger for auto generating the code
 
 
-type HandlerRequest struct {
-	HandlerId string `json:"handler-id"`
-	Advertisement string `json:"advertisement"`
-}
-
-type HandlerResponse struct {
-	Uri string `json:"uri"`
-}
-
 const (
-	ContentPacket        PacketType = 1
-	ContentRequestPacket PacketType = 2
-	RegisterHandlerPacket PacketType = 3
+	TrunkGroupDiscoveryPacket PacketType = 1
+	RegisterHandlerPacket PacketType = 2
+	ContentPacket        PacketType = 3
 )
 
+// types of content carried by the Content Paclet
 const (
 	ContentFilterMediaForward ContentFilter = 1
 	ContentFilterMediaReverse ContentFilter = 2
@@ -30,7 +20,6 @@ type FaceName string
 type PacketType byte
 type ContentFilter byte
 type DeliveryAddress string
-type ContentHash []byte
 
 type ContentMessage struct {
 	To DeliveryAddress
@@ -38,28 +27,12 @@ type ContentMessage struct {
 	Content []byte
 }
 
-func (msg ContentMessage) Hash() ContentHash {
-	h := sha1.New()
-	h.Write([]byte(msg.Content))
-	return ContentHash(h.Sum(nil))
-}
-
-type ContentRequestMessage struct {
-	To DeliveryAddress
-	Id int32
-}
-
-type RegisterHandlerMessage struct {
-	HandlerRequest HandlerRequest
-	HandlerResponse HandlerResponse
-}
-
 type Packet struct {
 	Type PacketType
 	Filter ContentFilter
 	Content ContentMessage
-	ContentRequest ContentRequestMessage
 	RegisterHandler RegisterHandlerMessage
+	TrunkGroupsInfo TrunkGroupsInfoMessage
 }
 
 type PacketEvent struct {
@@ -73,7 +46,7 @@ type PacketEvent struct {
 
 type Advertisement string
 
-/// Handler
+/// Handler Definition
 type HandlerInfo struct {
 	Id string
 	Advertisement Advertisement
@@ -87,4 +60,28 @@ func (h HandlerInfo) matchCaps(other HandlerInfo) bool {
 		return true
 	}
 	return false
+}
+
+type HandlerRequest struct {
+	HandlerId string `json:"handler-id"`
+	Advertisement string `json:"advertisement"`
+}
+
+type HandlerResponse struct {
+	Uri string `json:"uri"`
+}
+
+type RegisterHandlerMessage struct {
+	HandlerRequest HandlerRequest
+	HandlerResponse HandlerResponse
+}
+
+//// Trunk
+
+type TrunkGroup struct {
+	Uri string
+}
+
+type TrunkGroupsInfoMessage struct {
+	TrunkGroups map[string][]TrunkGroup
 }

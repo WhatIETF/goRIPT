@@ -8,14 +8,16 @@ import (
 
 func main() {
 	var port int
+	var devMode bool
 	flag.IntVar(&port, "port", 6121, "port on which to listen")
+	flag.BoolVar(&devMode, "dev", false, "Run the server in dev mode (self-signed certs)")
 	flag.Parse()
 
 	service := ript_net.NewRIPTService()
 	router := ript_net.NewRouter("ript-relay", service)
 
 	// h3 Server
-	h3Server := ript_net.NewQuicFaceServer(6121)
+	h3Server := ript_net.NewQuicFaceServer(6121, devMode)
 	router.AddFaceFactory(h3Server)
 
 	// ws Server
