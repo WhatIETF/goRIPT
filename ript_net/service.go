@@ -69,7 +69,7 @@ func (s *RIPTService) registerHandler(message api.RegisterHandlerMessage) (api.R
 		return api.RegisterHandlerMessage{}, nil
 	}
 
-	uri := baseUrl + "providertgs/trunk123/handlers/"+ hId.String()
+	uri := baseTtrunkGroupsUrl + "/" + defaultTrunkGroupId + "/" + hId.String()
 
 	h := api.HandlerInfo{
 		Id: message.HandlerRequest.HandlerId,

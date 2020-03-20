@@ -2,6 +2,7 @@ package ript_net
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,8 +14,9 @@ import (
 	"github.com/lucas-clemente/quic-go/http3"
 	"io"
 	"net/http"
-	"os"
 	"time"
+
+	"golang.org/x/crypto/acme/autocert"
 )
 
 // quic based transport
@@ -293,11 +295,36 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 	return router
 }
 
-func NewQuicFaceServer(port int) *QuicFaceServer {
+
+func NewQuicFaceServer(port int,  devMode bool) *QuicFaceServer {
+	var server *http.Server
+	url := fmt.Sprintf("localhost:%d", port)
+
+	if !devMode {
+		domain := "ietf107.ript-dev.com"
+		cacheDir := "."
+		certManager := autocert.Manager{
+			Prompt: autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(domain),
+		}
+		certManager.Cache = autocert.DirCache(cacheDir)
+
+		server = &http.Server{
+			Addr: ":https",
+			TLSConfig: &tls.Config{
+				GetCertificate: certManager.GetCertificate,
+			},
+		}
+	} else {
+		server = &http.Server{Handler: nil, Addr: url}
+	}
+
 	// rest of the config seems sane
 	quicConf := &quic.Config{
 		KeepAlive: true,
 	}
+
+	/*
 	quicConf.GetLogWriter = func(connID []byte) io.WriteCloser {
 		filename := fmt.Sprintf("client_%x.qlog", connID)
 		f, err := os.Create(filename)
@@ -306,12 +333,11 @@ func NewQuicFaceServer(port int) *QuicFaceServer {
 		}
 		log.Printf("Creating qlog file %s.\n", filename)
 		return f
-	}
+	}*/
 
-	url := fmt.Sprintf("localhost:%d", port)
 	quicServer := &QuicFaceServer{
 		Server: &http3.Server{
-			Server:     &http.Server{Handler: nil, Addr: url},
+			Server:     server,
 			QuicConfig: quicConf,
 		},
 		feedChan: make(chan Face, 10),
@@ -320,7 +346,14 @@ func NewQuicFaceServer(port int) *QuicFaceServer {
 
 	handler := setupHandler(quicServer)
 	quicServer.Handler = handler
-	go quicServer.ListenAndServeTLS(common.GetCertificatePaths())
+	if !devMode {
+		log.Printf("Starting Server in Prod Mode")
+		go quicServer.ListenAndServeTLS("", "")
+	} else {
+		log.Printf("Starting Server in Dev Mode")
+		go quicServer.ListenAndServeTLS(common.GetCertificatePaths())
+	}
+
 	log.Info("New Quic Server created.\n")
 	return quicServer
 }
