@@ -23,8 +23,10 @@ type QuicFace struct {
 	haveRecv  bool
 	// inbound face to router for processsing
 	recvChan chan api.PacketEvent
-	// app/router to face for outbound transport
+	// app/router to face for outbound transport/handlers
 	contentChan chan api.Packet
+	// channel for trunk discovery
+	tgDiscChan chan api.Packet
 	closeChan chan error
 	closed    bool
 	name string
@@ -45,8 +47,14 @@ func (f *QuicFace) Name() api.FaceName {
 
 
 func (f *QuicFace) Send(pkt api.Packet) error {
-	log.Printf("send: passing on the content [%d] to content chan, face [%s]", pkt.Content.Id, f.name)
-	f.contentChan <- pkt
+	switch pkt.Type {
+	case api.TrunkGroupDiscoveryPacket:
+		log.Printf("send: passing on the content to trunk discovery chan, face [%s]",  f.name)
+		f.tgDiscChan <- pkt
+	default:
+		log.Printf("send: passing on the content to general contnet chan, face [%s]",  f.name)
+		f.contentChan <- pkt
+	}
 	return nil
 }
 
@@ -73,6 +81,7 @@ func NewQuicFace(name string) *QuicFace {
 		haveRecv:  false,
 		closeChan: make(chan error, 1),
 		contentChan: make(chan api.Packet, 1),
+		tgDiscChan: make(chan api.Packet, 1),
 		closed:    false,
 		name:  name,
 	}
@@ -185,6 +194,33 @@ func HandlerRegistration(face *QuicFace, writer http.ResponseWriter, request *ht
 	}
 }
 
+
+func HandleTgDiscovery(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
+	// query service for list of trunk groups available
+	face.recvChan <- api.PacketEvent{
+		Sender: face.Name(),
+		Packet: api.Packet{
+			Type: api.TrunkGroupDiscoveryPacket,
+		},
+	}
+
+	// await response or timeout
+	select {
+	case <-time.After(2 * time.Second):
+		log.Errorf("HandleTgDiscovery: no content received .. ")
+		writer.WriteHeader(404)
+		return
+	case resPkt := <- face.tgDiscChan:
+		log.Printf("HandleTgDiscovery [%s] got content [%v]", face.Name(), resPkt)
+		enc, err := json.Marshal(resPkt)
+		if err != nil {
+			writer.WriteHeader(400)
+			return
+		}
+		writer.Write(enc)
+	}
+}
+
 // Mux handler for routing various h3 endpoints
 func setupHandler(server *QuicFaceServer) http.Handler {
 	router := mux.NewRouter()
@@ -232,11 +268,19 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 	}
 
 
-	// todo: tg discovery
-	//mux.HandleFunc("/.well-known/ript/v1/providerTgs", tgDiscFn)
+	tgDiscFn := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("trunk group discovery  from  [%v]", r.RemoteAddr)
+		//  get the face
+		face := server.faceMap[r.RemoteAddr]
+		HandleTgDiscovery(face, w, r)
+	}
+
+
+	fmt.Printf("trunkDiscoveryUrl [%s]", baseUrl+"/providerTgs")
+	router.HandleFunc(baseUrl+"/providertgs", tgDiscFn)
 
 	// handler registrations
-	router.HandleFunc("/.well-known/ript/v1/providerTgs/{trunkGroupId}/handlers",
+	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/handlers",
 		regHandlerFn).Methods(http.MethodPost)
 
 	router.HandleFunc("/media/join", joinFn)

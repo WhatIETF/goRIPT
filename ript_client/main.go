@@ -13,15 +13,27 @@ import (
 	"syscall"
 )
 
+// info about the provider
+type riptProviderInfo struct {
+	baseUrl string
+	trunkGroups map[string][]api.TrunkGroup
+}
+
+func (p *riptProviderInfo) getTrunkGroupUri() string {
+	// pick the outbound url as default
+	tg := p.trunkGroups["outbound"][0]
+	return tg.Uri
+}
+
 type riptClient struct {
 	client ript_net.Face
-	stopChan   chan bool
+	stopChan chan bool
 	doneChan chan bool
 	recvChan chan api.PacketEvent
 	// ript semantics
 	handlerInfo api.HandlerInfo
+	providerInfo *riptProviderInfo
 }
-
 
 func (c *riptClient) registerHandler() {
 	pkt := api.Packet{
@@ -47,6 +59,26 @@ func (c *riptClient) registerHandler() {
 	}
 
 	log.Printf("registerHandler: handlerInfo with uri: [%v]", c.handlerInfo)
+}
+
+func (c *riptClient) retrieveTrunkGroups() {
+	pkt := api.Packet{
+		Type: api.TrunkGroupDiscoveryPacket,
+	}
+
+	err := c.client.Send(pkt)
+	if err != nil {
+		log.Fatalf("retrieveTrunkGroups:  error [%v]", err)
+		panic(err)
+	}
+
+	// await response
+	select {
+	case response := <- c.recvChan:
+		c.providerInfo.trunkGroups = response.Packet.TrunkGroupsInfo.TrunkGroups
+	}
+
+	log.Printf("trukGroupDiscovery: tgs [%v]", c.providerInfo.trunkGroups)
 }
 
 func (c *riptClient) recordContent(client ript_net.Face) {
@@ -127,7 +159,7 @@ func (c *riptClient) stop() {
 }
 
 
-func NewRIPTClient(client ript_net.Face) *riptClient {
+func NewRIPTClient(client ript_net.Face, providerInfo *riptProviderInfo) *riptClient {
 	hId, err := uuid.NewUUID()
 	ad := "1 in: opus; PCMU; PCMA; 2 out: opus; PCMU; PCMA;"
 	if err != nil {
@@ -143,6 +175,7 @@ func NewRIPTClient(client ript_net.Face) *riptClient {
 			Id: hId.String(),
 			Advertisement: api.Advertisement(ad),
 		},
+		providerInfo: providerInfo,
 	}
 
 	ript.client.SetReceiveChan(ript.recvChan)
@@ -178,8 +211,11 @@ func main() {
 
 	var client ript_net.Face
 	var err error
+	provider := &riptProviderInfo{
+		baseUrl: baseUri,
+	}
 	if xport == "h3" {
-		client = NewQuicClientFace()
+		client = NewQuicClientFace(provider)
 	} else if xport == "ws" {
 		client, err = ript_net.NewWebSocketClientFace("ws://localhost:8080/")
 		if err != nil {
@@ -190,8 +226,12 @@ func main() {
 		return
 	}
 
-	riptClient := NewRIPTClient(client)
+	riptClient := NewRIPTClient(client, provider)
 
+	// 1. retrieve trunk groups
+	riptClient.retrieveTrunkGroups()
+
+	// 2. register this handler
 	riptClient.registerHandler()
 
 	if mode == "push" {
