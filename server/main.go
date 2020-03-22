@@ -17,8 +17,8 @@ func main() {
 	flag.StringVar(&serverHost, "host", "", "server address.")
 	flag.IntVar(&h3Port, "h3port", 2399, "H3 port on which to listen")
 	flag.IntVar(&wssPort, "wssport", 8080, "WSS port on which to listen")
-	flag.StringVar(&certFile,"certfile", "", "Full path for server cert file")
-	flag.StringVar(&keyFile,"keyfile", "", "Full path for server key file")
+	flag.StringVar(&certFile, "certfile", "", "Full path for server cert file")
+	flag.StringVar(&keyFile, "keyfile", "", "Full path for server key file")
 
 	flag.Parse()
 

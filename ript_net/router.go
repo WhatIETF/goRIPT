@@ -12,7 +12,7 @@ import (
 type Cache struct {
 	sync.Mutex
 	currentId int32
-	cache map[api.DeliveryAddress]map[int32]api.ContentMessage
+	cache     map[api.DeliveryAddress]map[int32]api.ContentMessage
 }
 
 func newCache() *Cache {
@@ -60,8 +60,8 @@ type Router struct {
 	faceLock sync.Mutex
 	faces    map[api.FaceName]Face
 	recvChan chan api.PacketEvent
-	cache *Cache
-	service *RIPTService
+	cache    *Cache
+	service  *RIPTService
 }
 
 func NewRouter(name string, service *RIPTService) *Router {
@@ -69,8 +69,8 @@ func NewRouter(name string, service *RIPTService) *Router {
 		name:     name,
 		faces:    map[api.FaceName]Face{},
 		recvChan: make(chan api.PacketEvent, 200),
-		cache: newCache(),
-		service: service,
+		cache:    newCache(),
+		service:  service,
 	}
 	go r.route()
 	return r
@@ -99,8 +99,8 @@ func (r *Router) route() {
 
 		case api.TrunkGroupDiscoveryPacket:
 			response := r.service.listTrunkGroups()
-			packet :=  api.Packet{
-				Type: api.TrunkGroupDiscoveryPacket,
+			packet := api.Packet{
+				Type:            api.TrunkGroupDiscoveryPacket,
 				TrunkGroupsInfo: response,
 			}
 
@@ -114,8 +114,8 @@ func (r *Router) route() {
 			// handler registration
 			// todo: handle error
 			response, _ := r.service.registerHandler(evt.Packet.RegisterHandler)
-			packet :=  api.Packet{
-				Type: api.RegisterHandlerPacket,
+			packet := api.Packet{
+				Type:            api.RegisterHandlerPacket,
 				RegisterHandler: response,
 			}
 

@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	DirectionIn = "in"
+	DirectionIn  = "in"
 	DirectionOut = "out"
 )
 
@@ -19,9 +19,9 @@ type CodecInfo struct {
 }
 
 type Capability struct {
-	Id int
+	Id        int
 	Direction string
-	Codecs []CodecInfo
+	Codecs    []CodecInfo
 }
 type AdvertisementInfo struct {
 	Caps []Capability
@@ -30,7 +30,7 @@ type AdvertisementInfo struct {
 // Crude parse function. Needs to be revisited once ABNF is defined
 func (ad Advertisement) Parse() (AdvertisementInfo, error) {
 
-	adLines := strings.Split(string(ad),"\n")
+	adLines := strings.Split(string(ad), "\n")
 	if len(adLines) == 0 {
 		return AdvertisementInfo{}, errors.New("error parsing advertisement")
 	}

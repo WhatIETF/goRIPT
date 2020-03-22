@@ -15,7 +15,7 @@ import (
 
 // info about the provider
 type riptProviderInfo struct {
-	baseUrl string
+	baseUrl     string
 	trunkGroups map[string][]api.TrunkGroup
 }
 
@@ -26,12 +26,12 @@ func (p *riptProviderInfo) getTrunkGroupUri() string {
 }
 
 type riptClient struct {
-	client ript_net.Face
+	client   ript_net.Face
 	stopChan chan bool
 	doneChan chan bool
 	recvChan chan api.PacketEvent
 	// ript semantics
-	handlerInfo api.HandlerInfo
+	handlerInfo  api.HandlerInfo
 	providerInfo *riptProviderInfo
 }
 
@@ -40,7 +40,7 @@ func (c *riptClient) registerHandler() {
 		Type: api.RegisterHandlerPacket,
 		RegisterHandler: api.RegisterHandlerMessage{
 			HandlerRequest: api.HandlerRequest{
-				HandlerId: c.handlerInfo.Id,
+				HandlerId:     c.handlerInfo.Id,
 				Advertisement: string(c.handlerInfo.Advertisement),
 			},
 		},
@@ -54,7 +54,7 @@ func (c *riptClient) registerHandler() {
 
 	// await response
 	select {
-	case response := <- c.recvChan:
+	case response := <-c.recvChan:
 		c.handlerInfo.Uri = response.Packet.RegisterHandler.HandlerResponse.Uri
 	}
 
@@ -74,7 +74,7 @@ func (c *riptClient) retrieveTrunkGroups() {
 
 	// await response
 	select {
-	case response := <- c.recvChan:
+	case response := <-c.recvChan:
 		c.providerInfo.trunkGroups = response.Packet.TrunkGroupsInfo.TrunkGroups
 	}
 
@@ -101,7 +101,7 @@ func (c *riptClient) recordContent(client ript_net.Face) {
 			return
 		case content := <-contentChan:
 			pkt := api.Packet{
-				Type: api.ContentPacket,
+				Type:   api.ContentPacket,
 				Filter: api.ContentFilterMediaForward,
 				Content: api.ContentMessage{
 					Id:      contentId,
@@ -119,7 +119,7 @@ func (c *riptClient) recordContent(client ript_net.Face) {
 	}
 }
 
-func (c * riptClient) playOutContent(client ript_net.Face) {
+func (c *riptClient) playOutContent(client ript_net.Face) {
 	defer func() {
 		c.doneChan <- true
 	}()
@@ -130,10 +130,10 @@ func (c * riptClient) playOutContent(client ript_net.Face) {
 
 	for {
 		select {
-		case <- c.stopChan:
+		case <-c.stopChan:
 			log.Println("playout stopped")
 			return
-		case evt := <- c.recvChan:
+		case evt := <-c.recvChan:
 			log.Printf("got media evt : [%v]", evt)
 			speaker.Play(evt.Packet.Content.Content)
 			continue
@@ -141,7 +141,7 @@ func (c * riptClient) playOutContent(client ript_net.Face) {
 			if !c.client.CanStream() {
 				// ask server for the packet
 				pkt := api.Packet{
-					Type: api.ContentPacket,
+					Type:   api.ContentPacket,
 					Filter: api.ContentFilterMediaReverse,
 				}
 				client.Send(pkt)
@@ -155,9 +155,8 @@ func (c *riptClient) stop() {
 		c.client.Close(nil)
 	}
 	c.stopChan <- true
-	<- c.doneChan
+	<-c.doneChan
 }
-
 
 func NewRIPTClient(client ript_net.Face, providerInfo *riptProviderInfo) *riptClient {
 	hId, err := uuid.NewUUID()
@@ -168,12 +167,12 @@ func NewRIPTClient(client ript_net.Face, providerInfo *riptProviderInfo) *riptCl
 	}
 
 	ript := &riptClient{
-		client: client,
-		stopChan:   make(chan bool, 1),
-		doneChan:   make(chan bool, 1),
+		client:   client,
+		stopChan: make(chan bool, 1),
+		doneChan: make(chan bool, 1),
 		recvChan: make(chan api.PacketEvent, 1),
 		handlerInfo: api.HandlerInfo{
-			Id: hId.String(),
+			Id:            hId.String(),
 			Advertisement: api.Advertisement(ad),
 		},
 		providerInfo: providerInfo,
@@ -200,7 +199,6 @@ func main() {
 	flag.StringVar(&mode, "mode", "", "push or pull media")
 
 	flag.Parse()
-
 
 	if server == "" {
 		log.Printf("Missing server address.")
@@ -252,7 +250,7 @@ func main() {
 		go riptClient.playOutContent(client)
 	}
 
-	<- sigs
+	<-sigs
 	riptClient.stop()
 	log.Println("Done .. exiting now !!!")
 }
@@ -262,4 +260,3 @@ func chk(err error) {
 		panic(err)
 	}
 }
-
