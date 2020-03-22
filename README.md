@@ -23,7 +23,7 @@ Note: Current code shows how h3 POST can be used to send/recv media for h3 trans
 
 ## Prerequisites
 
-1. Intal go 1.14 or later
+1. Install go 1.14 or later
 
 2. pkg-config, portaudio, opus, opusfile
 
@@ -46,6 +46,22 @@ go get gopkg.in/hraban/opus.v2
 
 ```
 go run server/main.go
+
+The program takes few optional arguments
+
+ -certfile string
+    	Full path for server cert file
+  -h3port int
+    	H3 port on which to listen (default 2399)
+  -host string
+    	server address. (default "")
+  -keyfile string
+    	Full path for server key file
+  -wssport int
+    	WSS port on which to listen (default 8080)
+    	
+ For running locally certfile from (common/cert.pem) and keyfile(common/priv.key) 
+ can be used.   	
 ```
 
 ## Run Clients
@@ -59,25 +75,11 @@ go build .
 
 Receiver:
 ```
-./ript_client --mode=pull  --xport=h3 
+./ript_client --server=https://localhost:2399 --mode=pull  --xport=h3 
 ```
 
 Sender:
 ```
-./ript_client --mode=push --xport=h3
+./ript_client --server=https://localhost:2399  --mode=push --xport=h3
 ```
-
-### WS Sender -> H3 Receiver
-
-Reciever: 
-```
-./ript_client --mode=pull  --xport=h3
-```
-
-Sender:
-```
-./ript_client --mode=push --xport=ws 
-```
-
-
 
