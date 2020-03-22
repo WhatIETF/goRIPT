@@ -17,14 +17,6 @@ import (
 	"time"
 )
 
-const (
-	baseUri = "https://localhost:6121"
-	trunkDiscoveryUrl = baseUri+"/.well-known/ript/v1/providertgs"
-	registerHandlerUrl = baseUri+"/.well-known/ript/v1/providertgs/trunk123/handlers"
-
-	mediaPushUrl = "https://localhost:6121/media/forward"
-	mediaPullUrl = "https://localhost:6121/media/reverse"
-)
 
 type QuicClientFace struct {
 	client *http.Client
@@ -61,12 +53,12 @@ func NewQuicClientFace(serverInfo *riptProviderInfo) *QuicClientFace {
 
 	client := &http.Client {
 		Transport: roundTripper,
-		Timeout: 2 * time.Second,
+		Timeout: 30 * time.Second,
 	}
 
-	registerUrl := "https://localhost:6121/media/join"
-	log.Info("ript_client: registering to the server...")
-	resp, err := client.Get(registerUrl)
+	url := serverInfo.baseUrl + "/media/join"
+	log.Info("ript_client: registering to the server...[%s]", url)
+	resp, err := client.Get(url)
 	if err != nil {
 		panic(err)
 	}
@@ -97,7 +89,7 @@ func (c *QuicClientFace) CanStream() bool {
 }
 
 func (c *QuicClientFace) Read() {
-	// .....
+	// ..... //
 }
 
 
@@ -111,6 +103,7 @@ func (c *QuicClientFace) Send(pkt api.Packet) error {
 		return err
 	}
 
+	// TODO: refactor the cases here.
 	var res *http.Response
 	var responsePacket api.Packet
 	err = nil
@@ -118,6 +111,7 @@ func (c *QuicClientFace) Send(pkt api.Packet) error {
 	case api.ContentPacket:
 		if pkt.Filter == api.ContentFilterMediaReverse {
 			// pull media by invoking GET operation
+			mediaPullUrl := c.serverInfo.baseUrl + "/media/reverse"
 			res, err = c.client.Get(mediaPullUrl)
 			if err != nil || res.StatusCode != 200 {
 				break
@@ -140,6 +134,8 @@ func (c *QuicClientFace) Send(pkt api.Packet) error {
 
 		} else {
 			// push media by posting captured content
+			mediaPushUrl := c.serverInfo.baseUrl + "/media/forward"
+
 			req, err := http.NewRequest(http.MethodPut, mediaPushUrl, buf)
 			if err != nil {
 				break
@@ -165,14 +161,15 @@ func (c *QuicClientFace) Send(pkt api.Packet) error {
 			break
 		}
 
-		log.Printf("HandlerRegistration response [%v]", res)
+		log.Printf("ript_client: HandlerRegistration response [%v]", res)
 
 		// forward the packet for further processing
 		c.recvChan <- api.PacketEvent{
 			Packet: responsePacket,
 		}
 	case api.TrunkGroupDiscoveryPacket:
-		fmt.Printf("trunkDiscovery url [%s]", trunkDiscoveryUrl)
+		trunkDiscoveryUrl := c.serverInfo.baseUrl + "/.well-known/ript/v1/providertgs"
+		fmt.Printf("ript_client: trunkDiscovery url [%s]", trunkDiscoveryUrl)
 		res, err = c.client.Get(trunkDiscoveryUrl)
 		if err != nil || res.StatusCode != 200 {
 			break

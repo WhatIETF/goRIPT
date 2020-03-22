@@ -190,29 +190,38 @@ func main() {
 	sigs := make(chan os.Signal)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
+	var server string
 	var xport string
-	var textMode bool
 	var mode string
-	flag.StringVar(&xport, "xport", "", "type of transport (h3/ws/..)")
-	flag.BoolVar(&textMode, "text", false, "Enable text-chat mode")
+
+	flag.StringVar(&server, "server", "", "server url as fqdn")
+	flag.StringVar(&xport, "xport", "", "type of transport (h3/ws)")
 	flag.StringVar(&mode, "mode", "", "push or pull media")
+
 	flag.Parse()
 
 
+	if server == "" {
+		log.Printf("Missing server address.")
+		return
+	}
+
 	if mode == "" {
-		fmt.Printf("mode not specified. please specify push or pull")
+		log.Printf("mode not specified. please specify push or pull")
 		return
 	}
 
 	if xport == "" {
-		fmt.Printf("xport not specified. please specify oneOf(h3/ws)")
+		log.Printf("xport not specified. please specify oneOf(h3/ws)")
 		return
 	}
+
+	log.Printf("Server [%s], Mode [%s], Transport [%s]", server, mode, xport)
 
 	var client ript_net.Face
 	var err error
 	provider := &riptProviderInfo{
-		baseUrl: baseUri,
+		baseUrl: server,
 	}
 	if xport == "h3" {
 		client = NewQuicClientFace(provider)
