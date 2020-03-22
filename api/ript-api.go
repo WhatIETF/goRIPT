@@ -56,10 +56,7 @@ type HandlerInfo struct {
 func (h HandlerInfo) matchCaps(other HandlerInfo) bool {
 	// exact match
 	// TODO: fix this for full cap-adv framework
-	if other.Advertisement == h.Advertisement {
-		return true
-	}
-	return false
+	return true
 }
 
 type HandlerRequest struct {

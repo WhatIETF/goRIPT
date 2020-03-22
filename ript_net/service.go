@@ -17,6 +17,12 @@ const (
 
 type TrunkGroupDirection string
 
+type Handler struct {
+	id string
+	adInfo api.AdvertisementInfo
+	uri string
+}
+
 // capture service representation
 // direction, allowed identities, allowed numbers, media capabilities of the service
 type Call struct {
@@ -27,7 +33,7 @@ type Call struct {
 /// local cache (replace this with db or file/json store)
 type RIPTService struct {
 	trunkGroups map[string][]api.TrunkGroup
-	handlers map[string]api.HandlerInfo
+	handlers map[string]Handler
 }
 
 func NewRIPTService() *RIPTService {
@@ -40,7 +46,7 @@ func NewRIPTService() *RIPTService {
 
 	return &RIPTService{
 		trunkGroups:tgs,
-		handlers: map[string]api.HandlerInfo{},
+		handlers: map[string]Handler{},
 	}
 }
 
@@ -70,12 +76,19 @@ func (s *RIPTService) registerHandler(message api.RegisterHandlerMessage) (api.R
 	}
 
 	uri := baseTtrunkGroupsUrl + "/" + defaultTrunkGroupId + "/" + hId.String()
-
-	h := api.HandlerInfo{
-		Id: message.HandlerRequest.HandlerId,
-		Advertisement: api.Advertisement(message.HandlerRequest.Advertisement),
-		Uri: uri,
+    ad := api.Advertisement(message.HandlerRequest.Advertisement)
+    parsed, err := ad.Parse()
+    if err != nil {
+    	return api.RegisterHandlerMessage{}, nil
 	}
+
+	h := Handler {
+		id: message.HandlerRequest.HandlerId,
+		adInfo: parsed,
+		uri: uri,
+	}
+
+	log.Printf("service: created handler [%v]", h)
 
 	s.handlers[message.HandlerRequest.HandlerId] = h
 

@@ -53,7 +53,7 @@ func NewQuicClientFace(serverInfo *riptProviderInfo) *QuicClientFace {
 
 	client := &http.Client {
 		Transport: roundTripper,
-		Timeout: 30 * time.Second,
+		Timeout: 2 * time.Second,
 	}
 
 	url := serverInfo.baseUrl + "/media/join"
@@ -208,8 +208,8 @@ func (c *QuicClientFace) SetReceiveChan(recv chan api.PacketEvent) {
 func (c *QuicClientFace) Close(err error) {
 	fmt.Printf("Close called on QuicFace with err %v\n", err)
 
-	leaveUrl := "https://localhost:6121/media/leave"
-	log.Info("ript_client: registering to the server...")
+	leaveUrl := c.serverInfo.baseUrl + "/media/leave"
+	log.Info("ript_client: Unregistering from the server...")
 	resp, err := c.client.Get(leaveUrl)
 	if err != nil {
 		panic(err)

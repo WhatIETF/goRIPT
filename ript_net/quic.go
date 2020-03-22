@@ -2,21 +2,22 @@ package ript_net
 
 import (
 	"bytes"
-	"crypto/tls"
+	"strconv"
+
+	//"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/WhatIETF/goRIPT/api"
-	"github.com/WhatIETF/goRIPT/common"
+	//"github.com/caddyserver/certmagic"
 	"github.com/gorilla/mux"
 	"github.com/labstack/gommon/log"
 	"github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/http3"
 	"io"
 	"net/http"
+	"os"
 	"time"
-
-	"golang.org/x/crypto/acme/autocert"
 )
 
 // quic based transport
@@ -296,65 +297,45 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 }
 
 
-func NewQuicFaceServer(port int,  devMode bool) *QuicFaceServer {
-	var server *http.Server
-	url := fmt.Sprintf("localhost:%d", port)
-
-	if !devMode {
-		domain := "ietf107.ript-dev.com"
-		cacheDir := "."
-		certManager := autocert.Manager{
-			Prompt: autocert.AcceptTOS,
-			HostPolicy: autocert.HostWhitelist(domain),
-		}
-		certManager.Cache = autocert.DirCache(cacheDir)
-
-		server = &http.Server{
-			Addr: ":https",
-			TLSConfig: &tls.Config{
-				GetCertificate: certManager.GetCertificate,
-			},
-		}
-	} else {
-		server = &http.Server{Handler: nil, Addr: url}
-	}
+func NewQuicFaceServer(port int, host, certFile, keyFile string) *QuicFaceServer {
+	url := host + ":" + strconv.Itoa(port)
+	log.Printf("Server Url [%s]", url)
 
 	// rest of the config seems sane
 	quicConf := &quic.Config{
 		KeepAlive: true,
 	}
 
-	/*
 	quicConf.GetLogWriter = func(connID []byte) io.WriteCloser {
-		filename := fmt.Sprintf("client_%x.qlog", connID)
+		filename := fmt.Sprintf("server_%x.qlog", connID)
 		f, err := os.Create(filename)
 		if err != nil {
 			log.Fatal(err)
 		}
 		log.Printf("Creating qlog file %s.\n", filename)
 		return f
-	}*/
+	}
 
 	quicServer := &QuicFaceServer{
 		Server: &http3.Server{
-			Server:     server,
+			Server:     &http.Server{Handler: nil, Addr: url},
 			QuicConfig: quicConf,
 		},
 		feedChan: make(chan Face, 10),
 		faceMap: map[string]*QuicFace{},
 	}
-
 	handler := setupHandler(quicServer)
 	quicServer.Handler = handler
-	if !devMode {
-		log.Printf("Starting Server in Prod Mode")
-		go quicServer.ListenAndServeTLS("", "")
-	} else {
-		log.Printf("Starting Server in Dev Mode")
-		go quicServer.ListenAndServeTLS(common.GetCertificatePaths())
-	}
 
-	log.Info("New Quic Server created.\n")
+	log.Printf("Starting Server certFile [%s], keyFile [%s]", certFile, keyFile)
+
+	go quicServer.ListenAndServeTLS(certFile, keyFile)
+	//if err != nil {
+	//	log.Fatalf("server start error [%v]", err)
+	//}
+
+
+	log.Info("New QUIC-H3 Server created.\n")
 	return quicServer
 }
 
