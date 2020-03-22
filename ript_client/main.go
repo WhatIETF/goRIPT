@@ -161,7 +161,8 @@ func (c *riptClient) stop() {
 
 func NewRIPTClient(client ript_net.Face, providerInfo *riptProviderInfo) *riptClient {
 	hId, err := uuid.NewUUID()
-	ad := "1 in: opus; PCMU; PCMA; 2 out: opus; PCMU; PCMA;"
+	ad := "1 in: opus;\n" +
+		"2 out: opus;\n"
 	if err != nil {
 		panic(err)
 	}

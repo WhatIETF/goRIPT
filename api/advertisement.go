@@ -28,7 +28,7 @@ type AdvertisementInfo struct {
 }
 
 // Crude parse function. Needs to be revisited once ABNF is defined
-func (ad Advertisement) parse() (AdvertisementInfo, error) {
+func (ad Advertisement) Parse() (AdvertisementInfo, error) {
 
 	adLines := strings.Split(string(ad),"\n")
 	if len(adLines) == 0 {
