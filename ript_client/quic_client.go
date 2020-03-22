@@ -17,16 +17,15 @@ import (
 	"time"
 )
 
-
 type QuicClientFace struct {
-	client *http.Client
-	serverInfo *riptProviderInfo
-	name api.FaceName
-	recvChan chan api.PacketEvent
-	haveRecv bool
-	sendChan chan api.Packet
-	closeChan chan error
-	haveClosed bool
+	client           *http.Client
+	serverInfo       *riptProviderInfo
+	name             api.FaceName
+	recvChan         chan api.PacketEvent
+	haveRecv         bool
+	sendChan         chan api.Packet
+	closeChan        chan error
+	haveClosed       bool
 	inboundContentId int32
 }
 
@@ -51,9 +50,9 @@ func NewQuicClientFace(serverInfo *riptProviderInfo) *QuicClientFace {
 		QuicConfig: quicConf,
 	}
 
-	client := &http.Client {
+	client := &http.Client{
 		Transport: roundTripper,
-		Timeout: 2 * time.Second,
+		Timeout:   2 * time.Second,
 	}
 
 	url := serverInfo.baseUrl + "/media/join"
@@ -70,12 +69,12 @@ func NewQuicClientFace(serverInfo *riptProviderInfo) *QuicClientFace {
 
 	log.Info("ript_client: register success !!!")
 
-	return &QuicClientFace {
-		client: client,
-		serverInfo: serverInfo,
-		haveRecv: false,
-		haveClosed: false,
-		closeChan: make(chan error, 1),
+	return &QuicClientFace{
+		client:           client,
+		serverInfo:       serverInfo,
+		haveRecv:         false,
+		haveClosed:       false,
+		closeChan:        make(chan error, 1),
 		inboundContentId: -1,
 	}
 }
@@ -91,7 +90,6 @@ func (c *QuicClientFace) CanStream() bool {
 func (c *QuicClientFace) Read() {
 	// ..... //
 }
-
 
 func (c *QuicClientFace) Send(pkt api.Packet) error {
 	buf := new(bytes.Buffer)
@@ -228,7 +226,7 @@ func (c *QuicClientFace) OnClose() chan error {
 //// helpers
 ///////
 
-func httpResponseToRiptPacket(response *http.Response) (api.Packet , error) {
+func httpResponseToRiptPacket(response *http.Response) (api.Packet, error) {
 	if response == nil {
 		return api.Packet{}, errors.New("ript_client: invalid response object")
 	}
@@ -237,7 +235,7 @@ func httpResponseToRiptPacket(response *http.Response) (api.Packet , error) {
 	_, err := io.Copy(body, response.Body)
 	if err != nil {
 		log.Errorf("ript_client: error retrieving the body: [%v]", err)
-		return  api.Packet{}, err
+		return api.Packet{}, err
 	}
 
 	var packet api.Packet

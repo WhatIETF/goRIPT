@@ -5,48 +5,47 @@ import (
 	"github.com/google/uuid"
 	"log"
 )
+
 // RIPT Service Business Logic
 
 // todo: move this to common place
 const (
-	baseUrl = "/.well-known/ript/v1"
-	baseTtrunkGroupsUrl = baseUrl + "/providertgs"
-	defaultTrunkGroupId = "trunkabc"
+	baseUrl                     = "/.well-known/ript/v1"
+	baseTtrunkGroupsUrl         = baseUrl + "/providertgs"
+	defaultTrunkGroupId         = "trunkabc"
 	trunkGroupDirectionOutbound = "outbound"
 )
 
 type TrunkGroupDirection string
 
 type Handler struct {
-	id string
+	id     string
 	adInfo api.AdvertisementInfo
-	uri string
+	uri    string
 }
 
 // capture service representation
 // direction, allowed identities, allowed numbers, media capabilities of the service
 type Call struct {
-
 }
-
 
 /// local cache (replace this with db or file/json store)
 type RIPTService struct {
 	trunkGroups map[string][]api.TrunkGroup
-	handlers map[string]Handler
+	handlers    map[string]Handler
 }
 
 func NewRIPTService() *RIPTService {
 	// TODO:  harcoded provider trunkGroupInfo, provision it via API
 	tgs := map[string][]api.TrunkGroup{
-		trunkGroupDirectionOutbound: []api.TrunkGroup{
+		trunkGroupDirectionOutbound: {
 			{Uri: baseTtrunkGroupsUrl + "/" + defaultTrunkGroupId},
 		},
 	}
 
 	return &RIPTService{
-		trunkGroups:tgs,
-		handlers: map[string]Handler{},
+		trunkGroups: tgs,
+		handlers:    map[string]Handler{},
 	}
 }
 
@@ -76,16 +75,16 @@ func (s *RIPTService) registerHandler(message api.RegisterHandlerMessage) (api.R
 	}
 
 	uri := baseTtrunkGroupsUrl + "/" + defaultTrunkGroupId + "/" + hId.String()
-    ad := api.Advertisement(message.HandlerRequest.Advertisement)
-    parsed, err := ad.Parse()
-    if err != nil {
-    	return api.RegisterHandlerMessage{}, nil
+	ad := api.Advertisement(message.HandlerRequest.Advertisement)
+	parsed, err := ad.Parse()
+	if err != nil {
+		return api.RegisterHandlerMessage{}, nil
 	}
 
-	h := Handler {
-		id: message.HandlerRequest.HandlerId,
+	h := Handler{
+		id:     message.HandlerRequest.HandlerId,
 		adInfo: parsed,
-		uri: uri,
+		uri:    uri,
 	}
 
 	log.Printf("service: created handler [%v]", h)

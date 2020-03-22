@@ -121,7 +121,6 @@ func (ws *WebSocketFace) CanStream() bool {
 	return true
 }
 
-
 /////
 
 func NewWebSocketClientFace(url string) (*WebSocketFace, error) {

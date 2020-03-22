@@ -23,16 +23,16 @@ import (
 // quic based transport
 
 type QuicFace struct {
-	haveRecv  bool
+	haveRecv bool
 	// inbound face to router for processsing
 	recvChan chan api.PacketEvent
 	// app/router to face for outbound transport/handlers
 	contentChan chan api.Packet
 	// channel for trunk discovery
 	tgDiscChan chan api.Packet
-	closeChan chan error
-	closed    bool
-	name string
+	closeChan  chan error
+	closed     bool
+	name       string
 }
 
 func (f *QuicFace) handleClose(code int, text string) error {
@@ -48,14 +48,13 @@ func (f *QuicFace) Name() api.FaceName {
 	return api.FaceName(f.name)
 }
 
-
 func (f *QuicFace) Send(pkt api.Packet) error {
 	switch pkt.Type {
 	case api.TrunkGroupDiscoveryPacket:
-		log.Printf("send: passing on the content to trunk discovery chan, face [%s]",  f.name)
+		log.Printf("send: passing on the content to trunk discovery chan, face [%s]", f.name)
 		f.tgDiscChan <- pkt
 	default:
-		log.Printf("send: passing on the content to general contnet chan, face [%s]",  f.name)
+		log.Printf("send: passing on the content to general contnet chan, face [%s]", f.name)
 		f.contentChan <- pkt
 	}
 	return nil
@@ -80,18 +79,17 @@ func (f *QuicFace) CanStream() bool {
 }
 
 func NewQuicFace(name string) *QuicFace {
-	q := &QuicFace {
-		haveRecv:  false,
-		closeChan: make(chan error, 1),
+	q := &QuicFace{
+		haveRecv:    false,
+		closeChan:   make(chan error, 1),
 		contentChan: make(chan api.Packet, 1),
-		tgDiscChan: make(chan api.Packet, 1),
-		closed:    false,
-		name:  name,
+		tgDiscChan:  make(chan api.Packet, 1),
+		closed:      false,
+		name:        name,
 	}
 	fmt.Printf("NewQuicFace %s created\n", name)
 	return q
 }
-
 
 ///////
 // Server
@@ -103,11 +101,10 @@ type QuicFaceServer struct {
 	faceMap map[string]*QuicFace
 }
 
-
 func HandleMediaPull(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
 	// await media packet
 	select {
-	case resPkt := <- face.contentChan:
+	case resPkt := <-face.contentChan:
 		log.Printf("mediaPull [%s] got content Id [%d] , len [%d] to send out", face.Name(),
 			resPkt.Content.Id, len(resPkt.Content.Content))
 		enc, err := json.Marshal(resPkt)
@@ -118,7 +115,6 @@ func HandleMediaPull(face *QuicFace, writer http.ResponseWriter, request *http.R
 		writer.Write(enc)
 	}
 }
-
 
 func HandleMediaPush(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
 	// 1. let the router's recv chan know of the pull request
@@ -186,7 +182,7 @@ func HandlerRegistration(face *QuicFace, writer http.ResponseWriter, request *ht
 		log.Errorf("handlerRegistration: no content received .. ")
 		writer.WriteHeader(404)
 		return
-	case resPkt := <- face.contentChan:
+	case resPkt := <-face.contentChan:
 		log.Printf("handlerRegistration [%s] got content [%v]", face.Name(), resPkt)
 		enc, err := json.Marshal(resPkt)
 		if err != nil {
@@ -196,7 +192,6 @@ func HandlerRegistration(face *QuicFace, writer http.ResponseWriter, request *ht
 		writer.Write(enc)
 	}
 }
-
 
 func HandleTgDiscovery(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
 	// query service for list of trunk groups available
@@ -213,7 +208,7 @@ func HandleTgDiscovery(face *QuicFace, writer http.ResponseWriter, request *http
 		log.Errorf("HandleTgDiscovery: no content received .. ")
 		writer.WriteHeader(404)
 		return
-	case resPkt := <- face.tgDiscChan:
+	case resPkt := <-face.tgDiscChan:
 		log.Printf("HandleTgDiscovery [%s] got content [%v]", face.Name(), resPkt)
 		enc, err := json.Marshal(resPkt)
 		if err != nil {
@@ -270,14 +265,12 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 		HandlerRegistration(face, w, r)
 	}
 
-
 	tgDiscFn := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("trunk group discovery  from  [%v]", r.RemoteAddr)
 		//  get the face
 		face := server.faceMap[r.RemoteAddr]
 		HandleTgDiscovery(face, w, r)
 	}
-
 
 	fmt.Printf("trunkDiscoveryUrl [%s]", baseUrl+"/providerTgs")
 	router.HandleFunc(baseUrl+"/providertgs", tgDiscFn)
@@ -295,7 +288,6 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 
 	return router
 }
-
 
 func NewQuicFaceServer(port int, host, certFile, keyFile string) *QuicFaceServer {
 	url := host + ":" + strconv.Itoa(port)
@@ -322,7 +314,7 @@ func NewQuicFaceServer(port int, host, certFile, keyFile string) *QuicFaceServer
 			QuicConfig: quicConf,
 		},
 		feedChan: make(chan Face, 10),
-		faceMap: map[string]*QuicFace{},
+		faceMap:  map[string]*QuicFace{},
 	}
 	handler := setupHandler(quicServer)
 	quicServer.Handler = handler
@@ -334,11 +326,9 @@ func NewQuicFaceServer(port int, host, certFile, keyFile string) *QuicFaceServer
 	//	log.Fatalf("server start error [%v]", err)
 	//}
 
-
 	log.Info("New QUIC-H3 Server created.\n")
 	return quicServer
 }
-
 
 func (server *QuicFaceServer) Feed() chan Face {
 	return server.feedChan

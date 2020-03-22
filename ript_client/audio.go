@@ -106,13 +106,13 @@ func opusDecompress(data []byte) ([]int16, error) {
 }
 
 type Microphone struct {
-	stream     *portaudio.Stream
-	errChan    chan error
-	stopChan   chan bool
-	doneChan   chan bool
+	stream      *portaudio.Stream
+	errChan     chan error
+	stopChan    chan bool
+	doneChan    chan bool
 	contentChan chan []byte
-	readBuffer []int16
-	read       []int16
+	readBuffer  []int16
+	read        []int16
 }
 
 func NewMicrophone() (*Microphone, error) {
