@@ -3,38 +3,44 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/WhatIETF/goRIPT/api"
-	"github.com/WhatIETF/goRIPT/ript_net"
-	"github.com/google/uuid"
-	"github.com/gordonklaus/portaudio"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
+
+	"github.com/WhatIETF/goRIPT/api"
+	"github.com/WhatIETF/goRIPT/ript_net"
+	"github.com/google/uuid"
+	"github.com/gordonklaus/portaudio"
 )
 
 // info about the provider
 type riptProviderInfo struct {
-	baseUrl     string
-	trunkGroups map[string][]api.TrunkGroup
+	baseUrl       string
+	trunkGroups   []api.TrunkGroupInfo
+	activeCallUri string
 }
 
 func (p *riptProviderInfo) getTrunkGroupUri() string {
-	// pick the outbound url as default
-	tg := p.trunkGroups["outbound"][0]
+	// pick the first entry as default
+	tg := p.trunkGroups[0]
 	return tg.Uri
 }
 
+// Handler representing an instance of a RIPT Client
 type riptClient struct {
 	client   ript_net.Face
 	stopChan chan bool
 	doneChan chan bool
 	recvChan chan api.PacketEvent
-	// ript semantics
+	// ript protocol semantics
 	handlerInfo  api.HandlerInfo
 	providerInfo *riptProviderInfo
+	callInfo     api.CallResponse
 }
 
+// Register this client's device capability with the provider
 func (c *riptClient) registerHandler() {
 	pkt := api.Packet{
 		Type: api.RegisterHandlerPacket,
@@ -61,6 +67,34 @@ func (c *riptClient) registerHandler() {
 	log.Printf("registerHandler: handlerInfo with uri: [%v]", c.handlerInfo)
 }
 
+// trigger's call creation on the provider for a given destination
+func (c *riptClient) placeCalls() {
+	pkt := api.Packet{
+		Type: api.CallsPacket,
+		Calls: api.CallsMessage{
+			Request: api.CallRequest{
+				HandlerUri:  c.handlerInfo.Uri,
+				Destination: "meeting123@eietf107.ript-dev.com",
+			},
+		},
+	}
+
+	err := c.client.Send(pkt)
+	if err != nil {
+		log.Fatalf("placeCalls:  error [%v]", err)
+		panic(err)
+	}
+
+	// await response
+	select {
+	case response := <-c.recvChan:
+		c.callInfo = response.Packet.Calls.Response
+	}
+	c.providerInfo.activeCallUri = c.callInfo.CallUri
+	log.Printf("placeCalls: callInfo: [%v]", c.callInfo)
+}
+
+// Bootstrap api to retrieve various available trunkGroups on the RIPT server
 func (c *riptClient) retrieveTrunkGroups() {
 	pkt := api.Packet{
 		Type: api.TrunkGroupDiscoveryPacket,
@@ -81,7 +115,8 @@ func (c *riptClient) retrieveTrunkGroups() {
 	log.Printf("trukGroupDiscovery: tgs [%v]", c.providerInfo.trunkGroups)
 }
 
-func (c *riptClient) recordContent(client ript_net.Face) {
+// Record audio from mic and send it to the server over a given transport
+func (c *riptClient) recordContent() {
 	defer func() {
 		c.doneChan <- true
 	}()
@@ -100,16 +135,33 @@ func (c *riptClient) recordContent(client ript_net.Face) {
 			chk(err)
 			return
 		case content := <-contentChan:
-			pkt := api.Packet{
-				Type:   api.ContentPacket,
-				Filter: api.ContentFilterMediaForward,
-				Content: api.ContentMessage{
-					Id:      contentId,
-					To:      "trunk123",
-					Content: content,
-				},
+			nanos := time.Now().UnixNano()
+			millis := nanos / 1000000
+			m := api.StreamContentMedia{
+				Type:        api.StreamContentTypeMedia,
+				SeqNo:       uint64(contentId),
+				Timestamp:   uint64(millis),
+				PayloadType: api.PayloadTypeOpus,
+				SourceId:    1,
+				SinkId:      1,
+				Media:       content,
 			}
-			err := client.Send(pkt)
+
+			pkt := api.Packet{
+				Type:        api.StreamMediaPacket,
+				Filter:      api.ContentFilterMediaForward,
+				StreamMedia: m,
+			}
+			/*
+				pkt := api.Packet{
+					Type:   api.ContentPacket,
+					Filter: api.ContentFilterMediaForward,
+					Content: api.ContentMessage{
+						Id:      contentId,
+						Content: content,
+					},
+				}*/
+			err := c.client.Send(pkt)
 			if err != nil {
 				log.Fatalf("recordContent: media send error [%v]", err)
 				continue
@@ -119,7 +171,8 @@ func (c *riptClient) recordContent(client ript_net.Face) {
 	}
 }
 
-func (c *riptClient) playOutContent(client ript_net.Face) {
+// Retrieve media packets from the sever and play it out on the speaker
+func (c *riptClient) playOutContent() {
 	defer func() {
 		c.doneChan <- true
 	}()
@@ -135,21 +188,21 @@ func (c *riptClient) playOutContent(client ript_net.Face) {
 			return
 		case evt := <-c.recvChan:
 			log.Printf("got media evt : [%v]", evt)
-			speaker.Play(evt.Packet.Content.Content)
+			speaker.Play(evt.Packet.StreamMedia.Media)
 			continue
 		default:
 			if !c.client.CanStream() {
 				// ask server for the packet
 				pkt := api.Packet{
-					Type:   api.ContentPacket,
-					Filter: api.ContentFilterMediaReverse,
+					Type: api.StreamMediaRequestPacket,
 				}
-				client.Send(pkt)
+				c.client.Send(pkt)
 			}
 		}
 	}
 }
 
+// For non streaming clients (H3), trigger's end of call trigger for terminating underlying connection
 func (c *riptClient) stop() {
 	if !c.client.CanStream() {
 		c.client.Close(nil)
@@ -160,8 +213,7 @@ func (c *riptClient) stop() {
 
 func NewRIPTClient(client ript_net.Face, providerInfo *riptProviderInfo) *riptClient {
 	hId, err := uuid.NewUUID()
-	ad := "1 in: opus;\n" +
-		"2 out: opus;\n"
+	ad := "1 in: opus;\n" + "2 out: opus;\n"
 	if err != nil {
 		panic(err)
 	}
@@ -193,11 +245,12 @@ func main() {
 	var server string
 	var xport string
 	var mode string
+	var dev bool
 
 	flag.StringVar(&server, "server", "", "server url as fqdn")
 	flag.StringVar(&xport, "xport", "", "type of transport (h3/ws)")
 	flag.StringVar(&mode, "mode", "", "push or pull media")
-
+	flag.BoolVar(&dev, "dev", false, "run client in dev mode with self-signed certs (needed for localhost)")
 	flag.Parse()
 
 	if server == "" {
@@ -223,7 +276,7 @@ func main() {
 		baseUrl: server,
 	}
 	if xport == "h3" {
-		client = NewQuicClientFace(provider)
+		client = NewQuicClientFace(provider, dev)
 	} else if xport == "ws" {
 		client, err = ript_net.NewWebSocketClientFace("ws://localhost:8080/")
 		if err != nil {
@@ -242,12 +295,15 @@ func main() {
 	// 2. register this handler
 	riptClient.registerHandler()
 
+	// 3. create calls object
+	riptClient.placeCalls()
+
 	if mode == "push" {
-		go riptClient.recordContent(client)
+		go riptClient.recordContent()
 	}
 
 	if mode == "pull" {
-		go riptClient.playOutContent(client)
+		go riptClient.playOutContent()
 	}
 
 	<-sigs

@@ -7,36 +7,42 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/WhatIETF/goRIPT/api"
-	"github.com/WhatIETF/goRIPT/common"
-	"github.com/labstack/gommon/log"
-	"github.com/lucas-clemente/quic-go"
-	"github.com/lucas-clemente/quic-go/http3"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/bifurcation/mint/syntax"
+
+	"github.com/WhatIETF/goRIPT/common"
+
+	"github.com/WhatIETF/goRIPT/api"
+	"github.com/labstack/gommon/log"
+	"github.com/lucas-clemente/quic-go"
+	"github.com/lucas-clemente/quic-go/http3"
 )
 
 type QuicClientFace struct {
-	client           *http.Client
-	serverInfo       *riptProviderInfo
-	name             api.FaceName
-	recvChan         chan api.PacketEvent
-	haveRecv         bool
-	sendChan         chan api.Packet
-	closeChan        chan error
-	haveClosed       bool
-	inboundContentId int32
+	client     *http.Client
+	serverInfo *riptProviderInfo
+	name       api.FaceName
+	recvChan   chan api.PacketEvent
+	haveRecv   bool
+	sendChan   chan api.Packet
+	closeChan  chan error
+	haveClosed bool
 }
 
-func NewQuicClientFace(serverInfo *riptProviderInfo) *QuicClientFace {
+func NewQuicClientFace(serverInfo *riptProviderInfo, dev bool) *QuicClientFace {
+
 	pool, err := x509.SystemCertPool()
 	if err != nil {
 		fmt.Printf("cert pool creation error")
 		return nil
 	}
-
-	common.AddRootCA(pool)
+	// add ca-cert when run in dev mode alone
+	if dev {
+		common.AddRootCA(pool)
+	}
 
 	quicConf := &quic.Config{
 		KeepAlive: true,
@@ -70,12 +76,11 @@ func NewQuicClientFace(serverInfo *riptProviderInfo) *QuicClientFace {
 	log.Info("ript_client: register success !!!")
 
 	return &QuicClientFace{
-		client:           client,
-		serverInfo:       serverInfo,
-		haveRecv:         false,
-		haveClosed:       false,
-		closeChan:        make(chan error, 1),
-		inboundContentId: -1,
+		client:     client,
+		serverInfo: serverInfo,
+		haveRecv:   false,
+		haveClosed: false,
+		closeChan:  make(chan error, 1),
 	}
 }
 
@@ -106,45 +111,63 @@ func (c *QuicClientFace) Send(pkt api.Packet) error {
 	var responsePacket api.Packet
 	err = nil
 	switch pkt.Type {
-	case api.ContentPacket:
-		if pkt.Filter == api.ContentFilterMediaReverse {
-			// pull media by invoking GET operation
-			mediaPullUrl := c.serverInfo.baseUrl + "/media/reverse"
-			res, err = c.client.Get(mediaPullUrl)
-			if err != nil || res.StatusCode != 200 {
-				break
-			}
+	case api.StreamMediaPacket:
+		url := c.serverInfo.baseUrl + c.serverInfo.getTrunkGroupUri() + "/calls/123/media"
+		log.Printf("ript_client: mediaPush: Url [%s]", url)
 
-			responsePacket, err = httpResponseToRiptPacket(res)
-			if err != nil {
-				break
-			}
+		enc, err := syntax.Marshal(pkt.StreamMedia)
+		if err != nil {
+			panic(err)
+		}
 
-			log.Printf("ript_client:mediapull: received content Id [%d], len [%d] bytes",
-				responsePacket.Content.Id, len(responsePacket.Content.Content))
+		req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(enc))
+		if err != nil {
+			break
+		}
+		req.Header.Set("Content-Type", "application/json; charset=utf-8")
 
-			// forward the packet for further processing
-			c.recvChan <- api.PacketEvent{
-				Packet: responsePacket,
-			}
+		res, err = c.client.Do(req)
+		if err != nil || res.StatusCode != 200 {
+			break
+		}
+		log.Printf("ript_client:send: posted media fragment Id [%d], len [%d]", pkt.StreamMedia.SeqNo,
+			len(pkt.StreamMedia.Media))
 
-			c.inboundContentId = responsePacket.Content.Id + 1
+	case api.StreamMediaRequestPacket:
+		url := c.serverInfo.baseUrl + c.serverInfo.getTrunkGroupUri() + "/calls/123/media"
+		log.Printf("ript_client: mediaPull: Url [%s]", url)
+		res, err = c.client.Get(url)
+		if err != nil || res.StatusCode != 200 {
+			break
+		}
 
-		} else {
-			// push media by posting captured content
-			mediaPushUrl := c.serverInfo.baseUrl + "/media/forward"
+		// extract the binary encoded media payload
+		body := &bytes.Buffer{}
+		_, err := io.Copy(body, res.Body)
+		if err != nil {
+			log.Errorf("ript_client: error retrieving the body: [%v]", err)
+			break
+		}
 
-			req, err := http.NewRequest(http.MethodPut, mediaPushUrl, buf)
-			if err != nil {
-				break
-			}
-			req.Header.Set("Content-Type", "application/json; charset=utf-8")
-			res, err = c.client.Do(req)
-			if err != nil || res.StatusCode != 200 {
-				break
-			}
-			log.Printf("ript_client:send: posted media fragment Id [%d], len [%d]", pkt.Content.Id,
-				len(pkt.Content.Content))
+		var media api.StreamContentMedia
+		_, err = syntax.Unmarshal(body.Bytes(), &media)
+		if err != nil {
+			log.Errorf("ript_client: media payload unmarshal error [%v]", err)
+			break
+		}
+
+		// construct pkt to forward it to the app layyer
+		responsePacket := api.Packet{
+			Type:        api.StreamMediaPacket,
+			StreamMedia: media,
+		}
+
+		log.Printf("ript_client:mediapull: received content Id [%d], len [%d] bytes",
+			responsePacket.StreamMedia.SeqNo, len(responsePacket.StreamMedia.Media))
+
+		// forward the packet for further processing
+		c.recvChan <- api.PacketEvent{
+			Packet: responsePacket,
 		}
 
 	case api.RegisterHandlerPacket:
@@ -165,6 +188,26 @@ func (c *QuicClientFace) Send(pkt api.Packet) error {
 		c.recvChan <- api.PacketEvent{
 			Packet: responsePacket,
 		}
+
+	case api.CallsPacket:
+		url := c.serverInfo.baseUrl + c.serverInfo.getTrunkGroupUri() + "/calls"
+		res, err = c.client.Post(url, "application/json; charset=utf-8", buf)
+		if err != nil || res.StatusCode != 200 {
+			break
+		}
+
+		responsePacket, err = httpResponseToRiptPacket(res)
+		if err != nil {
+			break
+		}
+
+		log.Printf("ript_client: Calls response [%v]", res)
+
+		// forward the packet for further processing
+		c.recvChan <- api.PacketEvent{
+			Packet: responsePacket,
+		}
+
 	case api.TrunkGroupDiscoveryPacket:
 		trunkDiscoveryUrl := c.serverInfo.baseUrl + "/.well-known/ript/v1/providertgs"
 		fmt.Printf("ript_client: trunkDiscovery url [%s]", trunkDiscoveryUrl)

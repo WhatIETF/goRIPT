@@ -3,9 +3,9 @@ package api
 import (
 	"errors"
 	"fmt"
-	"github.com/go-acme/lego/log"
-	"strconv"
 	"strings"
+
+	"github.com/go-acme/lego/log"
 )
 
 const (
@@ -18,11 +18,21 @@ type CodecInfo struct {
 	Codec string
 }
 
+func (ci CodecInfo) Match(other CodecInfo) bool {
+	// Code name match alone
+	// TODO: revisit this once we have more info on Cap/Adv model
+	if ci.Codec == other.Codec {
+		return true
+	}
+	return false
+}
+
 type Capability struct {
-	Id        int
+	Id        string
 	Direction string
 	Codecs    []CodecInfo
 }
+
 type AdvertisementInfo struct {
 	Caps []Capability
 }
@@ -50,11 +60,9 @@ func (ad Advertisement) Parse() (AdvertisementInfo, error) {
 			return adInfo, fmt.Errorf("line [%d] misses minimally required slots", idx)
 		}
 
-		id, err := strconv.Atoi(parts[0])
-		if err != nil {
-			return adInfo, err
-		}
+		id := parts[0]
 		cap.Id = id
+
 		dir := strings.TrimRight(parts[1], ":")
 
 		if dir != DirectionIn && dir != DirectionOut {
