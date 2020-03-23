@@ -336,7 +336,7 @@ func HandleMedia(face *QuicFace, writer http.ResponseWriter, request *http.Reque
 			TgId:   tgId,
 			CallId: callId,
 			Packet: api.Packet{
-				Type:        api.StreamContentTypeMedia,
+				Type:        api.StreamMediaPacket,
 				StreamMedia: media,
 			},
 		}
@@ -355,12 +355,10 @@ func HandleMedia(face *QuicFace, writer http.ResponseWriter, request *http.Reque
 		log.Errorf("HandleMedia: no content received .. ")
 		writer.WriteHeader(404)
 		return
-	case resPkt := <-face.mediaFwdChan:
-		log.Printf("HandlMediaFwd [%s] got content [%v]", face.Name(), resPkt)
-		return
 	case resPkt := <-face.mediaRevChan:
 		log.Printf("HandlMediaRev [%s] got content [%v]", face.Name(), resPkt)
-		enc, err := syntax.Marshal(resPkt)
+		// binary encode stream media payload
+		enc, err := syntax.Marshal(resPkt.StreamMedia)
 		if err != nil {
 			writer.WriteHeader(400)
 			return
@@ -399,7 +397,7 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 	}
 
 	leaveFn := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Leave from  [%v]", r.RemoteAddr)
+		log.Printf("Leave from [%v]", r.RemoteAddr)
 		//  get the face
 		face := server.faceMap[r.RemoteAddr]
 		if face != nil {
@@ -411,14 +409,14 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 	}
 
 	regHandlerFn := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("register handler from  [%v]", r.RemoteAddr)
+		log.Printf("register handler from [%v]", r.RemoteAddr)
 		//  get the face
 		face := server.faceMap[r.RemoteAddr]
 		HandlerRegistration(face, w, r)
 	}
 
 	tgDiscFn := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("trunk group discovery  from  [%v]", r.RemoteAddr)
+		log.Printf("trunk group discovery from [%v]", r.RemoteAddr)
 		//  get the face
 		face := server.faceMap[r.RemoteAddr]
 		HandleTgDiscovery(face, w, r)
@@ -432,7 +430,7 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 	}
 
 	mediaFn := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("mediaByWay from  [%v]", r.RemoteAddr)
+		log.Printf("mediaByWay from [%v]", r.RemoteAddr)
 		//  get the face
 		face := server.faceMap[r.RemoteAddr]
 		HandleMedia(face, w, r)
@@ -449,13 +447,13 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 	router.HandleFunc("/media/leave", leaveFn)
 
 	// calls
-	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/calls", mediaFn).Methods(http.MethodPost)
+	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/calls", callsFn).Methods(http.MethodPost)
 
 	// signaling byways
 
 	// media byways - PUT forward, GET reverse
 	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/calls/{callId}/media",
-		callsFn).Methods(http.MethodPut, http.MethodGet)
+		mediaFn).Methods(http.MethodPut, http.MethodGet)
 
 	router.HandleFunc("/media/forward", mediaPushFn).Methods(http.MethodPut)
 	router.HandleFunc("/media/reverse", mediaPullFn).Methods(http.MethodGet)

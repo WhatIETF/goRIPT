@@ -17,8 +17,9 @@ import (
 
 // info about the provider
 type riptProviderInfo struct {
-	baseUrl     string
-	trunkGroups []api.TrunkGroupInfo
+	baseUrl       string
+	trunkGroups   []api.TrunkGroupInfo
+	activeCallUri string
 }
 
 func (p *riptProviderInfo) getTrunkGroupUri() string {
@@ -89,11 +90,11 @@ func (c *riptClient) placeCalls() {
 	case response := <-c.recvChan:
 		c.callInfo = response.Packet.Calls.Response
 	}
-
+	c.providerInfo.activeCallUri = c.callInfo.CallUri
 	log.Printf("placeCalls: callInfo: [%v]", c.callInfo)
 }
 
-// Boostrap api to retrieve various available trunkGroups on the RIPT server
+// Bootstrap api to retrieve various available trunkGroups on the RIPT server
 func (c *riptClient) retrieveTrunkGroups() {
 	pkt := api.Packet{
 		Type: api.TrunkGroupDiscoveryPacket,
@@ -134,17 +135,6 @@ func (c *riptClient) recordContent() {
 			chk(err)
 			return
 		case content := <-contentChan:
-			/*
-							type StreamContentMedia struct {
-					Type        StreamContentType
-					SeqNo       uint64
-					Timestamp   uint64
-					PayloadType uint32
-					SourceId    uint8
-					SinkId      uint8
-					Media       []byte `tls:"head=varint"`
-				}
-			*/
 			nanos := time.Now().UnixNano()
 			millis := nanos / 1000000
 			m := api.StreamContentMedia{
@@ -198,13 +188,13 @@ func (c *riptClient) playOutContent() {
 			return
 		case evt := <-c.recvChan:
 			log.Printf("got media evt : [%v]", evt)
-			speaker.Play(evt.Packet.Content.Content)
+			speaker.Play(evt.Packet.StreamMedia.Media)
 			continue
 		default:
 			if !c.client.CanStream() {
 				// ask server for the packet
 				pkt := api.Packet{
-					Type: api.ContentPacket,
+					Type: api.StreamMediaRequestPacket,
 				}
 				c.client.Send(pkt)
 			}
