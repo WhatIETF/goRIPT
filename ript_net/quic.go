@@ -123,46 +123,6 @@ type QuicFaceServer struct {
 	faceMap map[string]*QuicFace
 }
 
-func HandleMediaPull(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
-	// await media packet
-	select {
-	case resPkt := <-face.contentChan:
-		log.Printf("mediaPull [%s] got content Id [%d] , len [%d] to send out", face.Name(),
-			resPkt.Content.Id, len(resPkt.Content.Content))
-		enc, err := json.Marshal(resPkt)
-		if err != nil {
-			writer.WriteHeader(400)
-			return
-		}
-		writer.Write(enc)
-	}
-}
-
-func HandleMediaPush(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
-	// 1. let the router's recv chan know of the pull request
-	// 2. await response from the router
-	log.Info("mediaPush: got packet\n")
-	body := &bytes.Buffer{}
-	_, err := io.Copy(body, request.Body)
-	if err != nil {
-		log.Errorf("Error retrieving the body: [%v]", err)
-		writer.WriteHeader(400)
-		return
-	}
-	var pkt api.Packet
-	err = json.Unmarshal(body.Bytes(), &pkt)
-	if err != nil {
-		log.Printf("Error unmarshal [%v]", err)
-		writer.WriteHeader(400)
-		return
-	}
-	face.recvChan <- api.PacketEvent{
-		Sender: face.Name(),
-		Packet: pkt,
-	}
-	writer.WriteHeader(200)
-}
-
 func HandlerRegistration(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
 	log.Printf("Handler registration from [%v]", request)
 	// extract trunkGroupId
@@ -373,20 +333,6 @@ func HandleMedia(face *QuicFace, writer http.ResponseWriter, request *http.Reque
 func setupHandler(server *QuicFaceServer) http.Handler {
 	router := mux.NewRouter()
 
-	mediaPullFn := func(w http.ResponseWriter, r *http.Request) {
-		//  get the face
-		face := server.faceMap[r.RemoteAddr]
-		log.Printf("mediaPull: Face [%s]", face.Name())
-		HandleMediaPull(face, w, r)
-	}
-
-	mediaPushFn := func(w http.ResponseWriter, r *http.Request) {
-		//  get the face
-		face := server.faceMap[r.RemoteAddr]
-		log.Printf("mediaPush: Face [%s]", face.Name())
-		HandleMediaPush(face, w, r)
-	}
-
 	// trigger's face creation as well
 	joinFn := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Join from  [%v]", r.RemoteAddr)
@@ -450,13 +396,11 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/calls", callsFn).Methods(http.MethodPost)
 
 	// signaling byways
+	// TODO
 
 	// media byways - PUT forward, GET reverse
 	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/calls/{callId}/media",
 		mediaFn).Methods(http.MethodPut, http.MethodGet)
-
-	router.HandleFunc("/media/forward", mediaPushFn).Methods(http.MethodPut)
-	router.HandleFunc("/media/reverse", mediaPullFn).Methods(http.MethodGet)
 
 	return router
 }
@@ -494,10 +438,6 @@ func NewQuicFaceServer(port int, host, certFile, keyFile string) *QuicFaceServer
 	log.Printf("Starting Server certFile [%s], keyFile [%s]", certFile, keyFile)
 
 	go quicServer.ListenAndServeTLS(certFile, keyFile)
-	//if err != nil {
-	//	log.Fatalf("server start error [%v]", err)
-	//}
-
 	log.Info("New QUIC-H3 Server created.\n")
 	return quicServer
 }

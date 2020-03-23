@@ -149,18 +149,8 @@ func (c *riptClient) recordContent() {
 
 			pkt := api.Packet{
 				Type:        api.StreamMediaPacket,
-				Filter:      api.ContentFilterMediaForward,
 				StreamMedia: m,
 			}
-			/*
-				pkt := api.Packet{
-					Type:   api.ContentPacket,
-					Filter: api.ContentFilterMediaForward,
-					Content: api.ContentMessage{
-						Id:      contentId,
-						Content: content,
-					},
-				}*/
 			err := c.client.Send(pkt)
 			if err != nil {
 				log.Fatalf("recordContent: media send error [%v]", err)

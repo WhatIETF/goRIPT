@@ -7,52 +7,6 @@ import (
 	"github.com/WhatIETF/goRIPT/api"
 )
 
-//// Packet Cache
-// todo(suhas): implement cache truncation
-type Cache struct {
-	sync.Mutex
-	currentId int32
-	cache     map[api.DeliveryAddress]map[int32]api.ContentMessage
-}
-
-func newCache() *Cache {
-	return &Cache{
-		cache: map[api.DeliveryAddress]map[int32]api.ContentMessage{},
-	}
-}
-
-func (c *Cache) Add(msg api.ContentMessage) {
-	c.Lock()
-	defer c.Unlock()
-	_, ok := c.cache[msg.To]
-	if !ok {
-		c.cache[msg.To] = map[int32]api.ContentMessage{}
-	}
-	c.currentId = msg.Id
-	c.cache[msg.To][c.currentId] = msg
-}
-
-func (c Cache) Get(addr api.DeliveryAddress, id int32) (api.ContentMessage, bool) {
-	messages := c.cache[addr]
-	if len(messages) == 0 {
-		return api.ContentMessage{}, false
-	}
-
-	if id == -1 {
-		id = c.currentId
-	}
-	msg := c.cache[addr][id]
-	if len(msg.Content) == 0 {
-		return api.ContentMessage{}, false
-	}
-
-	return msg, true
-}
-
-func (c Cache) Flush() {
-	c.cache = map[api.DeliveryAddress]map[int32]api.ContentMessage{}
-}
-
 /////
 
 type Router struct {
@@ -60,7 +14,6 @@ type Router struct {
 	faceLock sync.Mutex
 	faces    map[api.FaceName]Face
 	recvChan chan api.PacketEvent
-	cache    *Cache
 	service  *RIPTService
 }
 
@@ -69,7 +22,6 @@ func NewRouter(name string, service *RIPTService) *Router {
 		name:     name,
 		faces:    map[api.FaceName]Face{},
 		recvChan: make(chan api.PacketEvent, 200),
-		cache:    newCache(),
 		service:  service,
 	}
 	go r.route()
@@ -81,24 +33,6 @@ func (r *Router) route() {
 		log.Printf("[%s] received from [%s], packet %v", r.name, evt.Sender, evt.Packet.Type)
 
 		switch evt.Packet.Type {
-		case api.ContentPacket:
-			// add to cache
-			// todo: this is blind broadcast, needs to be optimized
-			// Forward the packet on all the faces (except sender)
-			log.Printf("ript_net: handle /mediaForward.")
-
-			for name, face := range r.faces {
-				if name == evt.Sender {
-					continue
-				}
-				log.Printf("[%s] forwarding Content [%d] on [%s]", r.name, evt.Packet.Content.Id, name)
-				err := face.Send(evt.Packet)
-				if err != nil {
-					r.RemoveFace(face, err)
-				}
-			}
-			continue
-
 		case api.TrunkGroupDiscoveryPacket:
 			log.Printf("ript_net: handle /trunkGroupDiscovery.")
 
@@ -129,6 +63,7 @@ func (r *Router) route() {
 				r.RemoveFace(r.faces[evt.Sender], err)
 			}
 			continue
+
 		case api.CallsPacket:
 			log.Printf("ript_net: handle /calls.")
 			response, _ := r.service.processCalls(evt.TgId, evt.Packet.Calls)
@@ -142,6 +77,7 @@ func (r *Router) route() {
 				r.RemoveFace(r.faces[evt.Sender], err)
 			}
 			continue
+
 		case api.StreamMediaPacket:
 			m := evt.Packet.StreamMedia
 			log.Printf("ript_net: handle /mediaForward. SourceId [%v], SinkId [%v], SeqNo [%v]",

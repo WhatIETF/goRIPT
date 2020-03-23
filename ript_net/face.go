@@ -2,8 +2,7 @@ package ript_net
 
 import "github.com/WhatIETF/goRIPT/api"
 
-//  Abstract interface for the underlying transport
-
+// Abstract interface for the underlying transport
 type Face interface {
 	Name() api.FaceName
 	Send(pkt api.Packet) error

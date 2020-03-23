@@ -7,33 +7,16 @@ const (
 	TrunkGroupDiscoveryPacket PacketType = 1
 	RegisterHandlerPacket     PacketType = 2
 	CallsPacket               PacketType = 3
-	ContentPacket             PacketType = 4
 	StreamMediaPacket         PacketType = 5
 	StreamMediaAckPacket      PacketType = 6
 	StreamMediaRequestPacket  PacketType = 7
 )
 
-// types of content carried by the Content Paclet
-const (
-	ContentFilterMediaForward ContentFilter = 1
-	ContentFilterMediaReverse ContentFilter = 2
-)
-
 type FaceName string
 type PacketType byte
-type ContentFilter byte
-type DeliveryAddress string
-
-type ContentMessage struct {
-	To      DeliveryAddress
-	Id      int32
-	Content []byte
-}
 
 type Packet struct {
 	Type               PacketType
-	Filter             ContentFilter
-	Content            ContentMessage
 	RegisterHandler    RegisterHandlerMessage
 	TrunkGroupsInfo    TrunkGroupsInfoMessage
 	Calls              CallsMessage
