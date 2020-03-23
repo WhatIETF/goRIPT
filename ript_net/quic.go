@@ -15,7 +15,6 @@ import (
 	//"github.com/caddyserver/certmagic"
 	"io"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -24,19 +23,19 @@ import (
 	"github.com/lucas-clemente/quic-go/http3"
 )
 
-// quic based transport
+// quic/h3 based transport
 
 type QuicFace struct {
 	haveRecv bool
-	// inbound face to router for processsing
+	// inbound face to router for processing
 	recvChan chan api.PacketEvent
-	// app/router to face for outbound transport/handlers
-	contentChan chan api.Packet
 	// channel for trunk discovery
 	tgDiscChan chan api.Packet
-	// calls
+	// channel for /handlers
+	handlerRegChan chan api.Packet
+	// channel for /calls
 	callsChan chan api.Packet
-	// mediaFwd
+	// channel for media push
 	mediaFwdChan chan api.Packet
 	// mediaReverse
 	mediaRevChan chan api.Packet
@@ -51,7 +50,7 @@ func (f *QuicFace) handleClose(code int, text string) error {
 }
 
 func (f *QuicFace) Read() {
-	// nothing to implement  unless we
+	// nothing to implement here unless we do bidirectional/server driven transactions
 }
 
 func (f *QuicFace) Name() api.FaceName {
@@ -63,6 +62,9 @@ func (f *QuicFace) Send(pkt api.Packet) error {
 	case api.TrunkGroupDiscoveryPacket:
 		log.Printf("send: passing on the content to trunk discovery chan, face [%s]", f.name)
 		f.tgDiscChan <- pkt
+	case api.RegisterHandlerPacket:
+		log.Printf("send: passing on the content to handler reg chan, face [%s]", f.name)
+		f.handlerRegChan <- pkt
 	case api.CallsPacket:
 		log.Printf("send: passing on the content to calls chan, face [%s]", f.name)
 		f.callsChan <- pkt
@@ -73,8 +75,7 @@ func (f *QuicFace) Send(pkt api.Packet) error {
 		log.Printf("send: passing on the media  packet to  mediaRevchan, face [%s]", f.name)
 		f.mediaRevChan <- pkt
 	default:
-		log.Printf("send: passing on the content to general contnet chan, face [%s]", f.name)
-		f.contentChan <- pkt
+		log.Errorf("send: packet type [%v] unknown", pkt.Type)
 	}
 	return nil
 }
@@ -99,15 +100,15 @@ func (f *QuicFace) CanStream() bool {
 
 func NewQuicFace(name string) *QuicFace {
 	q := &QuicFace{
-		haveRecv:     false,
-		closeChan:    make(chan error, 1),
-		contentChan:  make(chan api.Packet, 1),
-		tgDiscChan:   make(chan api.Packet, 1),
-		callsChan:    make(chan api.Packet, 1),
-		mediaFwdChan: make(chan api.Packet, 20),
-		mediaRevChan: make(chan api.Packet, 20),
-		closed:       false,
-		name:         name,
+		haveRecv:       false,
+		closeChan:      make(chan error, 1),
+		tgDiscChan:     make(chan api.Packet, 1),
+		handlerRegChan: make(chan api.Packet, 1),
+		callsChan:      make(chan api.Packet, 1),
+		mediaFwdChan:   make(chan api.Packet, 20),
+		mediaRevChan:   make(chan api.Packet, 20),
+		closed:         false,
+		name:           name,
 	}
 	fmt.Printf("NewQuicFace %s created\n", name)
 	return q
@@ -115,6 +116,8 @@ func NewQuicFace(name string) *QuicFace {
 
 ///////
 // Server
+///////
+
 type QuicFaceServer struct {
 	*http3.Server
 	feedChan chan Face
@@ -123,6 +126,7 @@ type QuicFaceServer struct {
 	faceMap map[string]*QuicFace
 }
 
+// Client Handler Registration
 func HandlerRegistration(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
 	log.Printf("Handler registration from [%v]", request)
 	// extract trunkGroupId
@@ -135,17 +139,9 @@ func HandlerRegistration(face *QuicFace, writer http.ResponseWriter, request *ht
 	}
 
 	// extract handler info from the body
-	body := &bytes.Buffer{}
-	_, err := io.Copy(body, request.Body)
+	pkt, err := httpRequestBodyToRiptPacket(request)
 	if err != nil {
-		log.Errorf("Error retrieving the body: [%v]", err)
-		writer.WriteHeader(400)
-		return
-	}
-	var pkt api.Packet
-	err = json.Unmarshal(body.Bytes(), &pkt)
-	if err != nil {
-		log.Printf("Error unmarshal [%v]", err)
+		log.Error(err)
 		writer.WriteHeader(400)
 		return
 	}
@@ -165,7 +161,7 @@ func HandlerRegistration(face *QuicFace, writer http.ResponseWriter, request *ht
 		log.Errorf("handlerRegistration: no content received .. ")
 		writer.WriteHeader(404)
 		return
-	case resPkt := <-face.contentChan:
+	case resPkt := <-face.handlerRegChan:
 		log.Printf("handlerRegistration [%s] got content [%v]", face.Name(), resPkt)
 		enc, err := json.Marshal(resPkt)
 		if err != nil {
@@ -205,6 +201,7 @@ func HandleTgDiscovery(face *QuicFace, writer http.ResponseWriter, request *http
 func HandleCalls(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
 	// extract trunkGroupId
 	params := mux.Vars(request)
+
 	tgId := params["trunkGroupId"]
 	if len(tgId) == 0 {
 		log.Errorf("missing trunkGroupId")
@@ -213,17 +210,9 @@ func HandleCalls(face *QuicFace, writer http.ResponseWriter, request *http.Reque
 	}
 
 	// extract handler info from the body
-	body := &bytes.Buffer{}
-	_, err := io.Copy(body, request.Body)
+	pkt, err := httpRequestBodyToRiptPacket(request)
 	if err != nil {
-		log.Errorf("Error retrieving the body: [%v]", err)
-		writer.WriteHeader(400)
-		return
-	}
-	var pkt api.Packet
-	err = json.Unmarshal(body.Bytes(), &pkt)
-	if err != nil {
-		log.Printf("Error unmarshal [%v]", err)
+		log.Error(err)
 		writer.WriteHeader(400)
 		return
 	}
@@ -267,8 +256,8 @@ func HandleMedia(face *QuicFace, writer http.ResponseWriter, request *http.Reque
 	callId := params["callId"]
 	if len(callId) == 0 {
 		log.Errorf("media: missing callId")
-		//writer.WriteHeader(400)
-		//return
+		writer.WriteHeader(400)
+		return
 	}
 
 	// extract the body
@@ -348,7 +337,6 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 		face := server.faceMap[r.RemoteAddr]
 		if face != nil {
 			face.closeChan <- errors.New("client leave")
-			close(face.contentChan)
 			delete(server.faceMap, r.RemoteAddr)
 		}
 		w.WriteHeader(200)
@@ -382,23 +370,24 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 		HandleMedia(face, w, r)
 	}
 
-	fmt.Printf("trunkDiscoveryUrl [%s]", baseUrl+"/providerTgs")
+	// TgDiscovery
 	router.HandleFunc(baseUrl+"/providertgs", tgDiscFn).Methods(http.MethodGet)
 
-	// handler registrations
+	// Handler registrations
 	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/handlers",
 		regHandlerFn).Methods(http.MethodPost)
 
+	// Misc ones (revisit)
 	router.HandleFunc("/media/join", joinFn)
 	router.HandleFunc("/media/leave", leaveFn)
 
-	// calls
+	//Calls
 	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/calls", callsFn).Methods(http.MethodPost)
 
 	// signaling byways
 	// TODO
 
-	// media byways - PUT forward, GET reverse
+	// MediaBywats - PUT forward, GET reverse
 	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/calls/{callId}/media",
 		mediaFn).Methods(http.MethodPut, http.MethodGet)
 
@@ -409,20 +398,20 @@ func NewQuicFaceServer(port int, host, certFile, keyFile string) *QuicFaceServer
 	url := host + ":" + strconv.Itoa(port)
 	log.Printf("Server Url [%s]", url)
 
-	// rest of the config seems sane
 	quicConf := &quic.Config{
 		KeepAlive: true,
 	}
 
-	quicConf.GetLogWriter = func(connID []byte) io.WriteCloser {
-		filename := fmt.Sprintf("server_%x.qlog", connID)
-		f, err := os.Create(filename)
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("Creating qlog file %s.\n", filename)
-		return f
-	}
+	/*
+		quicConf.GetLogWriter = func(connID []byte) io.WriteCloser {
+			filename := fmt.Sprintf("server_%x.qlog", connID)
+			f, err := os.Create(filename)
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Printf("Creating qlog file %s.\n", filename)
+			return f
+		}*/
 
 	quicServer := &QuicFaceServer{
 		Server: &http3.Server{
@@ -444,4 +433,24 @@ func NewQuicFaceServer(port int, host, certFile, keyFile string) *QuicFaceServer
 
 func (server *QuicFaceServer) Feed() chan Face {
 	return server.feedChan
+}
+
+/////
+/// Utilities
+////
+
+func httpRequestBodyToRiptPacket(request *http.Request) (api.Packet, error) {
+	body := &bytes.Buffer{}
+	_, err := io.Copy(body, request.Body)
+	if err != nil {
+		return api.Packet{}, fmt.Errorf("error retrieving the body: [%v]", err)
+	}
+
+	var pkt api.Packet
+	err = json.Unmarshal(body.Bytes(), &pkt)
+	if err != nil {
+		return api.Packet{}, fmt.Errorf("error unmarshal [%v]", err)
+	}
+
+	return pkt, nil
 }

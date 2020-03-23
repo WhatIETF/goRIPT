@@ -38,17 +38,13 @@ type PacketEvent struct {
 
 type Advertisement string
 
-/// Handler Definition
+/////
+// Handler Definition
+////
 type HandlerInfo struct {
 	Id            string
 	Advertisement Advertisement
 	Uri           string
-}
-
-func (h HandlerInfo) matchCaps(other HandlerInfo) bool {
-	// exact match
-	// TODO: fix this for full cap-adv framework
-	return true
 }
 
 type HandlerRequest struct {
@@ -65,7 +61,9 @@ type RegisterHandlerMessage struct {
 	HandlerResponse HandlerResponse
 }
 
-//// Trunk
+/////
+// Trunk
+////
 
 type TrunkGroupInfo struct {
 	Uri string
@@ -75,7 +73,10 @@ type TrunkGroupsInfoMessage struct {
 	TrunkGroups []TrunkGroupInfo
 }
 
-//// Calls
+//////
+// Calls
+/////
+
 type CallRequest struct {
 	HandlerUri  string `json:"uri"`
 	Destination string `json:"destination"`
@@ -92,7 +93,10 @@ type CallsMessage struct {
 	Response CallResponse
 }
 
-///// Media
+/////
+// Media
+/////
+
 const (
 	// stream content types (media/control)
 	StreamContentTypeMedia   = 0

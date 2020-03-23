@@ -28,6 +28,7 @@ func NewRouter(name string, service *RIPTService) *Router {
 	return r
 }
 
+//TODO: Handle Error reporting
 func (r *Router) route() {
 	for evt := range r.recvChan {
 		log.Printf("[%s] received from [%s], packet %v", r.name, evt.Sender, evt.Packet.Type)
@@ -35,7 +36,6 @@ func (r *Router) route() {
 		switch evt.Packet.Type {
 		case api.TrunkGroupDiscoveryPacket:
 			log.Printf("ript_net: handle /trunkGroupDiscovery.")
-
 			response := r.service.listTrunkGroups()
 			packet := api.Packet{
 				Type:            api.TrunkGroupDiscoveryPacket,
@@ -50,7 +50,6 @@ func (r *Router) route() {
 
 		case api.RegisterHandlerPacket:
 			// handler registration
-			// todo: handle error
 			log.Printf("ript_net: handle /handlerRegistration.")
 			response, _ := r.service.registerHandler(evt.Packet.RegisterHandler)
 			packet := api.Packet{
@@ -123,8 +122,8 @@ func (r *Router) awaitFaceClose(face Face) {
 	r.RemoveFace(face, err)
 }
 
-func (b *Router) AddFaceFactory(factory FaceFactory) {
-	go b.readFaceFeed(factory.Feed())
+func (r *Router) AddFaceFactory(factory FaceFactory) {
+	go r.readFaceFeed(factory.Feed())
 }
 
 func (r *Router) readFaceFeed(faceChan chan Face) {
