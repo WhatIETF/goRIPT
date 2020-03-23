@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strconv"
 
+	"github.com/bifurcation/mint/syntax"
+
 	//"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -34,10 +36,13 @@ type QuicFace struct {
 	tgDiscChan chan api.Packet
 	// calls
 	callsChan chan api.Packet
-
-	closeChan chan error
-	closed    bool
-	name      string
+	// mediaFwd
+	mediaFwdChan chan api.Packet
+	// mediaReverse
+	mediaRevChan chan api.Packet
+	closeChan    chan error
+	closed       bool
+	name         string
 }
 
 func (f *QuicFace) handleClose(code int, text string) error {
@@ -61,6 +66,12 @@ func (f *QuicFace) Send(pkt api.Packet) error {
 	case api.CallsPacket:
 		log.Printf("send: passing on the content to calls chan, face [%s]", f.name)
 		f.callsChan <- pkt
+	case api.StreamMediaAckPacket:
+		log.Printf("send: passing on the media ack packet to  mediaFwdchan, face [%s]", f.name)
+		f.mediaFwdChan <- pkt
+	case api.StreamMediaPacket:
+		log.Printf("send: passing on the media  packet to  mediaRevchan, face [%s]", f.name)
+		f.mediaRevChan <- pkt
 	default:
 		log.Printf("send: passing on the content to general contnet chan, face [%s]", f.name)
 		f.contentChan <- pkt
@@ -88,13 +99,15 @@ func (f *QuicFace) CanStream() bool {
 
 func NewQuicFace(name string) *QuicFace {
 	q := &QuicFace{
-		haveRecv:    false,
-		closeChan:   make(chan error, 1),
-		contentChan: make(chan api.Packet, 1),
-		tgDiscChan:  make(chan api.Packet, 1),
-		callsChan:   make(chan api.Packet, 1),
-		closed:      false,
-		name:        name,
+		haveRecv:     false,
+		closeChan:    make(chan error, 1),
+		contentChan:  make(chan api.Packet, 1),
+		tgDiscChan:   make(chan api.Packet, 1),
+		callsChan:    make(chan api.Packet, 1),
+		mediaFwdChan: make(chan api.Packet, 20),
+		mediaRevChan: make(chan api.Packet, 20),
+		closed:       false,
+		name:         name,
 	}
 	fmt.Printf("NewQuicFace %s created\n", name)
 	return q
@@ -281,6 +294,83 @@ func HandleCalls(face *QuicFace, writer http.ResponseWriter, request *http.Reque
 	}
 }
 
+func HandleMedia(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
+	// extract trunkGroupId and CallId
+	params := mux.Vars(request)
+	tgId := params["trunkGroupId"]
+	if len(tgId) == 0 {
+		log.Errorf("media: missing trunkGroupId")
+		writer.WriteHeader(400)
+		return
+	}
+
+	callId := params["callId"]
+	if len(callId) == 0 {
+		log.Errorf("media: missing callId")
+		//writer.WriteHeader(400)
+		//return
+	}
+
+	// extract the body
+	body := &bytes.Buffer{}
+	_, err := io.Copy(body, request.Body)
+	if err != nil {
+		log.Errorf("media: error retrieving the body: [%v]", err)
+		writer.WriteHeader(400)
+		return
+	}
+
+	// media push
+	if request.Method == http.MethodPut {
+		// encoded data is StreamContentMedia (no ack supported today)
+		var media api.StreamContentMedia
+		_, err := syntax.Unmarshal(body.Bytes(), &media)
+		if err != nil {
+			log.Errorf("media: unmarshal error [%v]", err)
+			writer.WriteHeader(400)
+		}
+
+		// pass the packet to router
+		face.recvChan <- api.PacketEvent{
+			Sender: face.Name(),
+			TgId:   tgId,
+			CallId: callId,
+			Packet: api.Packet{
+				Type:        api.StreamContentTypeMedia,
+				StreamMedia: media,
+			},
+		}
+
+		// TODO: send a 200 Ok (until Ack is implemented)
+		writer.WriteHeader(200)
+		return
+	} else if request.Method == http.MethodGet {
+		// handle media pull
+		// do nothing for now
+	}
+
+	// await response or timeout
+	select {
+	case <-time.After(2 * time.Second):
+		log.Errorf("HandleMedia: no content received .. ")
+		writer.WriteHeader(404)
+		return
+	case resPkt := <-face.mediaFwdChan:
+		log.Printf("HandlMediaFwd [%s] got content [%v]", face.Name(), resPkt)
+		return
+	case resPkt := <-face.mediaRevChan:
+		log.Printf("HandlMediaRev [%s] got content [%v]", face.Name(), resPkt)
+		enc, err := syntax.Marshal(resPkt)
+		if err != nil {
+			writer.WriteHeader(400)
+			return
+		}
+		writer.Write(enc)
+		return
+	}
+
+}
+
 // Mux handler for routing various h3 endpoints
 func setupHandler(server *QuicFaceServer) http.Handler {
 	router := mux.NewRouter()
@@ -341,8 +431,15 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 		HandleCalls(face, w, r)
 	}
 
+	mediaFn := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("mediaByWay from  [%v]", r.RemoteAddr)
+		//  get the face
+		face := server.faceMap[r.RemoteAddr]
+		HandleMedia(face, w, r)
+	}
+
 	fmt.Printf("trunkDiscoveryUrl [%s]", baseUrl+"/providerTgs")
-	router.HandleFunc(baseUrl+"/providertgs", tgDiscFn)
+	router.HandleFunc(baseUrl+"/providertgs", tgDiscFn).Methods(http.MethodGet)
 
 	// handler registrations
 	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/handlers",
@@ -352,10 +449,14 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 	router.HandleFunc("/media/leave", leaveFn)
 
 	// calls
-	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/calls", callsFn)
+	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/calls", mediaFn).Methods(http.MethodPost)
+
 	// signaling byways
 
-	// media byways
+	// media byways - PUT forward, GET reverse
+	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/calls/{callId}/media",
+		callsFn).Methods(http.MethodPut, http.MethodGet)
+
 	router.HandleFunc("/media/forward", mediaPushFn).Methods(http.MethodPut)
 	router.HandleFunc("/media/reverse", mediaPullFn).Methods(http.MethodGet)
 

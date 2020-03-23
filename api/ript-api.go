@@ -8,6 +8,9 @@ const (
 	RegisterHandlerPacket     PacketType = 2
 	CallsPacket               PacketType = 3
 	ContentPacket             PacketType = 4
+	StreamMediaPacket         PacketType = 5
+	StreamMediaAckPacket      PacketType = 6
+	StreamMediaRequestPacket  PacketType = 7
 )
 
 // types of content carried by the Content Paclet
@@ -28,17 +31,21 @@ type ContentMessage struct {
 }
 
 type Packet struct {
-	Type            PacketType
-	Filter          ContentFilter
-	Content         ContentMessage
-	RegisterHandler RegisterHandlerMessage
-	TrunkGroupsInfo TrunkGroupsInfoMessage
-	Calls           CallsMessage
+	Type               PacketType
+	Filter             ContentFilter
+	Content            ContentMessage
+	RegisterHandler    RegisterHandlerMessage
+	TrunkGroupsInfo    TrunkGroupsInfoMessage
+	Calls              CallsMessage
+	StreamMedia        StreamContentMedia
+	StreamMediaAck     Acknowledgement
+	StreamMediaRequest StreamContentRequest
 }
 
 type PacketEvent struct {
 	Sender FaceName
 	TgId   string
+	CallId string
 	Packet Packet
 }
 
@@ -100,4 +107,41 @@ type CallResponse struct {
 type CallsMessage struct {
 	Request  CallRequest
 	Response CallResponse
+}
+
+///// Media
+const (
+	// stream content types (media/control)
+	StreamContentTypeMedia   = 0
+	StreamContentTypeControl = 1
+
+	// media codec types
+	PayloadTypeOpus = 1
+
+	// control message types
+	StreamContentControlTypeAck = 0
+)
+
+type StreamContentType uint8
+type StreamContentControlType int16
+
+type StreamContentRequest struct {
+}
+
+type StreamContentMedia struct {
+	Type        StreamContentType
+	SeqNo       uint64
+	Timestamp   uint64
+	PayloadType uint32
+	SourceId    uint8
+	SinkId      uint8
+	Media       []byte `tls:"head=varint"`
+}
+
+type Acknowledgement struct {
+	Type        StreamContentType //media/control
+	ControlType StreamContentControlType
+	Direction   string
+	SourceId    uint8
+	SinkId      uint8
 }

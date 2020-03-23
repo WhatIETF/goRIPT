@@ -142,6 +142,22 @@ func (r *Router) route() {
 				r.RemoveFace(r.faces[evt.Sender], err)
 			}
 			continue
+		case api.StreamMediaPacket:
+			m := evt.Packet.StreamMedia
+			log.Printf("ript_net: handle /mediaForward. SourceId [%s], SinkId [%s]", m.SourceId, m.SinkId)
+
+			for name, face := range r.faces {
+				if name == evt.Sender {
+					continue
+				}
+				log.Printf("[%s] forwarding Content [%d] on [%s]", r.name, evt.Packet.Content.Id, name)
+				err := face.Send(evt.Packet)
+				if err != nil {
+					r.RemoveFace(face, err)
+				}
+			}
+			continue
+
 		default:
 			log.Fatalf("unknown packet type [%s]", evt.Packet.Type)
 		}

@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/bifurcation/mint/syntax"
+
 	"github.com/WhatIETF/goRIPT/common"
 
 	"github.com/WhatIETF/goRIPT/api"
@@ -31,14 +33,17 @@ type QuicClientFace struct {
 	inboundContentId int32
 }
 
-func NewQuicClientFace(serverInfo *riptProviderInfo) *QuicClientFace {
+func NewQuicClientFace(serverInfo *riptProviderInfo, dev bool) *QuicClientFace {
+
 	pool, err := x509.SystemCertPool()
 	if err != nil {
 		fmt.Printf("cert pool creation error")
 		return nil
 	}
-
-	common.AddRootCA(pool)
+	// add ca-cert when run in dev mode alone
+	if dev {
+		common.AddRootCA(pool)
+	}
 
 	quicConf := &quic.Config{
 		KeepAlive: true,
@@ -108,6 +113,26 @@ func (c *QuicClientFace) Send(pkt api.Packet) error {
 	var responsePacket api.Packet
 	err = nil
 	switch pkt.Type {
+	case api.StreamMediaPacket:
+		enc, err := syntax.Marshal(pkt.StreamMedia)
+		if err != nil {
+			panic(err)
+		}
+
+		url := c.serverInfo.baseUrl + c.serverInfo.getTrunkGroupUri() + "/calls/123/media" +
+			log.Printf("ript_client: mediaPush: Url [%s]", url)
+		req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(enc))
+		if err != nil {
+			break
+		}
+		req.Header.Set("Content-Type", "application/json; charset=utf-8")
+		res, err = c.client.Do(req)
+		if err != nil || res.StatusCode != 200 {
+			break
+		}
+		log.Printf("ript_client:send: posted media fragment Id [%d], len [%d]", pkt.Content.Id,
+			len(pkt.Content.Content))
+
 	case api.ContentPacket:
 		if pkt.Filter == api.ContentFilterMediaReverse {
 			// pull media by invoking GET operation
