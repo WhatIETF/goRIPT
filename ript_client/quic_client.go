@@ -7,14 +7,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/WhatIETF/goRIPT/api"
-	"github.com/WhatIETF/goRIPT/common"
-	"github.com/labstack/gommon/log"
-	"github.com/lucas-clemente/quic-go"
-	"github.com/lucas-clemente/quic-go/http3"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/WhatIETF/goRIPT/common"
+
+	"github.com/WhatIETF/goRIPT/api"
+	"github.com/labstack/gommon/log"
+	"github.com/lucas-clemente/quic-go"
+	"github.com/lucas-clemente/quic-go/http3"
 )
 
 type QuicClientFace struct {
@@ -165,6 +167,26 @@ func (c *QuicClientFace) Send(pkt api.Packet) error {
 		c.recvChan <- api.PacketEvent{
 			Packet: responsePacket,
 		}
+
+	case api.CallsPacket:
+		url := c.serverInfo.baseUrl + c.serverInfo.getTrunkGroupUri() + "/calls"
+		res, err = c.client.Post(url, "application/json; charset=utf-8", buf)
+		if err != nil || res.StatusCode != 200 {
+			break
+		}
+
+		responsePacket, err = httpResponseToRiptPacket(res)
+		if err != nil {
+			break
+		}
+
+		log.Printf("ript_client: Calls response [%v]", res)
+
+		// forward the packet for further processing
+		c.recvChan <- api.PacketEvent{
+			Packet: responsePacket,
+		}
+
 	case api.TrunkGroupDiscoveryPacket:
 		trunkDiscoveryUrl := c.serverInfo.baseUrl + "/.well-known/ript/v1/providertgs"
 		fmt.Printf("ript_client: trunkDiscovery url [%s]", trunkDiscoveryUrl)

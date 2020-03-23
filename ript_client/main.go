@@ -3,25 +3,26 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/WhatIETF/goRIPT/api"
-	"github.com/WhatIETF/goRIPT/ript_net"
-	"github.com/google/uuid"
-	"github.com/gordonklaus/portaudio"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/WhatIETF/goRIPT/api"
+	"github.com/WhatIETF/goRIPT/ript_net"
+	"github.com/google/uuid"
+	"github.com/gordonklaus/portaudio"
 )
 
 // info about the provider
 type riptProviderInfo struct {
 	baseUrl     string
-	trunkGroups map[string][]api.TrunkGroup
+	trunkGroups []api.TrunkGroupInfo
 }
 
 func (p *riptProviderInfo) getTrunkGroupUri() string {
-	// pick the outbound url as default
-	tg := p.trunkGroups["outbound"][0]
+	// pick the first entry as default
+	tg := p.trunkGroups[0]
 	return tg.Uri
 }
 
@@ -33,6 +34,7 @@ type riptClient struct {
 	// ript semantics
 	handlerInfo  api.HandlerInfo
 	providerInfo *riptProviderInfo
+	callInfo     api.CallResponse
 }
 
 func (c *riptClient) registerHandler() {
@@ -59,6 +61,32 @@ func (c *riptClient) registerHandler() {
 	}
 
 	log.Printf("registerHandler: handlerInfo with uri: [%v]", c.handlerInfo)
+}
+
+func (c *riptClient) placeCalls() {
+	pkt := api.Packet{
+		Type: api.CallsPacket,
+		Calls: api.CallsMessage{
+			Request: api.CallRequest{
+				HandlerUri:  c.handlerInfo.Uri,
+				Destination: "meeting123@eietf107.ript-dev.com",
+			},
+		},
+	}
+
+	err := c.client.Send(pkt)
+	if err != nil {
+		log.Fatalf("placeCalls:  error [%v]", err)
+		panic(err)
+	}
+
+	// await response
+	select {
+	case response := <-c.recvChan:
+		c.callInfo = response.Packet.Calls.Response
+	}
+
+	log.Printf("placeCalls: callInfo: [%v]", c.callInfo)
 }
 
 func (c *riptClient) retrieveTrunkGroups() {
@@ -241,6 +269,9 @@ func main() {
 
 	// 2. register this handler
 	riptClient.registerHandler()
+
+	// 3. create calls object
+	riptClient.placeCalls()
 
 	if mode == "push" {
 		go riptClient.recordContent(client)

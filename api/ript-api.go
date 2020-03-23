@@ -6,7 +6,8 @@ package api
 const (
 	TrunkGroupDiscoveryPacket PacketType = 1
 	RegisterHandlerPacket     PacketType = 2
-	ContentPacket             PacketType = 3
+	CallsPacket               PacketType = 3
+	ContentPacket             PacketType = 4
 )
 
 // types of content carried by the Content Paclet
@@ -32,10 +33,12 @@ type Packet struct {
 	Content         ContentMessage
 	RegisterHandler RegisterHandlerMessage
 	TrunkGroupsInfo TrunkGroupsInfoMessage
+	Calls           CallsMessage
 }
 
 type PacketEvent struct {
 	Sender FaceName
+	TgId   string
 	Packet Packet
 }
 
@@ -74,10 +77,27 @@ type RegisterHandlerMessage struct {
 
 //// Trunk
 
-type TrunkGroup struct {
+type TrunkGroupInfo struct {
 	Uri string
 }
 
 type TrunkGroupsInfoMessage struct {
-	TrunkGroups map[string][]TrunkGroup
+	TrunkGroups []TrunkGroupInfo
+}
+
+//// Calls
+type CallRequest struct {
+	HandlerUri  string `json:"uri"`
+	Destination string `json:"destination"`
+}
+
+type CallResponse struct {
+	CallUri         string `json:"uri"`
+	ClientDirective string `json:"clientDirectives"`
+	ServerDirective string `json:"serverDirectives"`
+}
+
+type CallsMessage struct {
+	Request  CallRequest
+	Response CallResponse
 }

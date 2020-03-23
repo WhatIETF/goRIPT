@@ -8,16 +8,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"github.com/WhatIETF/goRIPT/api"
 	//"github.com/caddyserver/certmagic"
-	"github.com/gorilla/mux"
-	"github.com/labstack/gommon/log"
-	"github.com/lucas-clemente/quic-go"
-	"github.com/lucas-clemente/quic-go/http3"
 	"io"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/gorilla/mux"
+	"github.com/labstack/gommon/log"
+	"github.com/lucas-clemente/quic-go"
+	"github.com/lucas-clemente/quic-go/http3"
 )
 
 // quic based transport
@@ -30,9 +32,12 @@ type QuicFace struct {
 	contentChan chan api.Packet
 	// channel for trunk discovery
 	tgDiscChan chan api.Packet
-	closeChan  chan error
-	closed     bool
-	name       string
+	// calls
+	callsChan chan api.Packet
+
+	closeChan chan error
+	closed    bool
+	name      string
 }
 
 func (f *QuicFace) handleClose(code int, text string) error {
@@ -53,6 +58,9 @@ func (f *QuicFace) Send(pkt api.Packet) error {
 	case api.TrunkGroupDiscoveryPacket:
 		log.Printf("send: passing on the content to trunk discovery chan, face [%s]", f.name)
 		f.tgDiscChan <- pkt
+	case api.CallsPacket:
+		log.Printf("send: passing on the content to calls chan, face [%s]", f.name)
+		f.callsChan <- pkt
 	default:
 		log.Printf("send: passing on the content to general contnet chan, face [%s]", f.name)
 		f.contentChan <- pkt
@@ -84,6 +92,7 @@ func NewQuicFace(name string) *QuicFace {
 		closeChan:   make(chan error, 1),
 		contentChan: make(chan api.Packet, 1),
 		tgDiscChan:  make(chan api.Packet, 1),
+		callsChan:   make(chan api.Packet, 1),
 		closed:      false,
 		name:        name,
 	}
@@ -173,6 +182,7 @@ func HandlerRegistration(face *QuicFace, writer http.ResponseWriter, request *ht
 	// pass the packet to router
 	face.recvChan <- api.PacketEvent{
 		Sender: face.Name(),
+		TgId:   tgId,
 		Packet: pkt,
 	}
 
@@ -210,6 +220,58 @@ func HandleTgDiscovery(face *QuicFace, writer http.ResponseWriter, request *http
 		return
 	case resPkt := <-face.tgDiscChan:
 		log.Printf("HandleTgDiscovery [%s] got content [%v]", face.Name(), resPkt)
+		enc, err := json.Marshal(resPkt)
+		if err != nil {
+			writer.WriteHeader(400)
+			return
+		}
+		writer.Write(enc)
+	}
+}
+
+func HandleCalls(face *QuicFace, writer http.ResponseWriter, request *http.Request) {
+	// extract trunkGroupId
+	params := mux.Vars(request)
+	tgId := params["trunkGroupId"]
+	if len(tgId) == 0 {
+		log.Errorf("missing trunkGroupId")
+		writer.WriteHeader(400)
+		return
+	}
+
+	// extract handler info from the body
+	body := &bytes.Buffer{}
+	_, err := io.Copy(body, request.Body)
+	if err != nil {
+		log.Errorf("Error retrieving the body: [%v]", err)
+		writer.WriteHeader(400)
+		return
+	}
+	var pkt api.Packet
+	err = json.Unmarshal(body.Bytes(), &pkt)
+	if err != nil {
+		log.Printf("Error unmarshal [%v]", err)
+		writer.WriteHeader(400)
+		return
+	}
+
+	log.Printf("HandlerCalls: trunk [%s], Request [%v]", tgId, pkt)
+
+	// pass the packet to router
+	face.recvChan <- api.PacketEvent{
+		Sender: face.Name(),
+		TgId:   tgId,
+		Packet: pkt,
+	}
+
+	// await response or timeout
+	select {
+	case <-time.After(2 * time.Second):
+		log.Errorf("HandleCalls: no content received .. ")
+		writer.WriteHeader(404)
+		return
+	case resPkt := <-face.callsChan:
+		log.Printf("HandleCalls [%s] got content [%v]", face.Name(), resPkt)
 		enc, err := json.Marshal(resPkt)
 		if err != nil {
 			writer.WriteHeader(400)
@@ -272,6 +334,13 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 		HandleTgDiscovery(face, w, r)
 	}
 
+	callsFn := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("calls from  [%v]", r.RemoteAddr)
+		//  get the face
+		face := server.faceMap[r.RemoteAddr]
+		HandleCalls(face, w, r)
+	}
+
 	fmt.Printf("trunkDiscoveryUrl [%s]", baseUrl+"/providerTgs")
 	router.HandleFunc(baseUrl+"/providertgs", tgDiscFn)
 
@@ -281,6 +350,10 @@ func setupHandler(server *QuicFaceServer) http.Handler {
 
 	router.HandleFunc("/media/join", joinFn)
 	router.HandleFunc("/media/leave", leaveFn)
+
+	// calls
+	router.HandleFunc("/.well-known/ript/v1/providertgs/{trunkGroupId}/calls", callsFn)
+	// signaling byways
 
 	// media byways
 	router.HandleFunc("/media/forward", mediaPushFn).Methods(http.MethodPut)

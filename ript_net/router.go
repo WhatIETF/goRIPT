@@ -85,6 +85,8 @@ func (r *Router) route() {
 			// add to cache
 			// todo: this is blind broadcast, needs to be optimized
 			// Forward the packet on all the faces (except sender)
+			log.Printf("ript_net: handle /mediaForward.")
+
 			for name, face := range r.faces {
 				if name == evt.Sender {
 					continue
@@ -98,6 +100,8 @@ func (r *Router) route() {
 			continue
 
 		case api.TrunkGroupDiscoveryPacket:
+			log.Printf("ript_net: handle /trunkGroupDiscovery.")
+
 			response := r.service.listTrunkGroups()
 			packet := api.Packet{
 				Type:            api.TrunkGroupDiscoveryPacket,
@@ -113,6 +117,7 @@ func (r *Router) route() {
 		case api.RegisterHandlerPacket:
 			// handler registration
 			// todo: handle error
+			log.Printf("ript_net: handle /handlerRegistration.")
 			response, _ := r.service.registerHandler(evt.Packet.RegisterHandler)
 			packet := api.Packet{
 				Type:            api.RegisterHandlerPacket,
@@ -123,7 +128,20 @@ func (r *Router) route() {
 			if err != nil {
 				r.RemoveFace(r.faces[evt.Sender], err)
 			}
+			continue
+		case api.CallsPacket:
+			log.Printf("ript_net: handle /calls.")
+			response, _ := r.service.processCalls(evt.TgId, evt.Packet.Calls)
+			packet := api.Packet{
+				Type:  api.CallsPacket,
+				Calls: response,
+			}
 
+			err := r.faces[evt.Sender].Send(packet)
+			if err != nil {
+				r.RemoveFace(r.faces[evt.Sender], err)
+			}
+			continue
 		default:
 			log.Fatalf("unknown packet type [%s]", evt.Packet.Type)
 		}
