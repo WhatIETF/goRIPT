@@ -61,7 +61,7 @@ The program takes few optional arguments
     	WSS port on which to listen (default 8080)
     	
  For running locally certfile from (common/cert.pem) and keyfile(common/priv.key) 
- can be used.   	
+ will be used.   	
 ```
 
 ## Run Clients
@@ -69,17 +69,20 @@ The program takes few optional arguments
 ```
 cd ript_client
 go build .
+
+ When running locally CA certfile form (commom/ca.pem) will be used by default. 
 ```
 
 ### H3 Sender -> H3 Receiver
 
 Receiver:
 ```
-./ript_client --server=https://localhost:2399 --mode=pull  --xport=h3 
+./ript_client --server=https://localhost:2399 --mode=pull  --xport=h3 --dev
 ```
 
 Sender:
 ```
-./ript_client --server=https://localhost:2399  --mode=push --xport=h3
+./ript_client --server=https://localhost:2399  --mode=push --xport=h3 --dev
 ```
+Note: "--dev" option is needed when clients are talking to server run locally.
 
