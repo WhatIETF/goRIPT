@@ -178,7 +178,7 @@ func (c *riptClient) playOutContent() {
 			return
 		case evt := <-c.recvChan:
 			log.Printf("got media evt : [%v]", evt)
-			speaker.Play(evt.Packet.StreamMedia.Media)
+			go speaker.Play(evt.Packet.StreamMedia.Media)
 			continue
 		default:
 			if !c.client.CanStream() {
