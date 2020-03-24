@@ -2,6 +2,7 @@ package api
 
 // API definitions for ript
 // TODO: Use RAML/Swagger for auto generating the code
+// TODO: some of these can move into common/
 
 const (
 	TrunkGroupDiscoveryPacket PacketType = 1
@@ -83,9 +84,9 @@ type CallRequest struct {
 }
 
 type CallResponse struct {
-	CallUri         string `json:"uri"`
-	ClientDirective string `json:"clientDirectives"`
-	ServerDirective string `json:"serverDirectives"`
+	CallUri         string    `json:"uri"`
+	ClientDirective Directive `json:"clientDirectives"`
+	ServerDirective Directive `json:"serverDirectives"`
 }
 
 type CallsMessage struct {

@@ -37,21 +37,6 @@ type Handler struct {
 	uri    string
 }
 
-// Client or server directive
-type Directive struct {
-	sourceId string // always server
-	sinkId   string
-	codec    api.CodecInfo
-}
-
-func (d Directive) GenClientDirectives() string {
-	return d.sinkId + " to " + d.sourceId + ":" + d.codec.Codec + ";"
-}
-
-func (d Directive) GenServerDirectives() string {
-	return d.sourceId + " to " + d.sinkId + ":" + d.codec.Codec + ";"
-}
-
 // capture service representation
 // direction, allowed identities, allowed numbers, media capabilities of the service
 type Call struct {
@@ -187,7 +172,7 @@ func (s *RIPTService) processCalls(tgId string, message api.CallsMessage) (api.C
 
 	response := api.CallResponse{
 		CallUri:         call.uri,
-		ClientDirective: directives[0].GenClientDirectives(),
+		ClientDirective: directives[0].GenServerDirectives(),
 		ServerDirective: directives[0].GenServerDirectives(),
 	}
 
@@ -199,7 +184,7 @@ func (s *RIPTService) processCalls(tgId string, message api.CallsMessage) (api.C
 ////
 
 // Crude and incorrect match implementation. Needs to be redone
-func Match(s, o api.Advertisement) ([]Directive, bool) {
+func Match(s, o api.Advertisement) ([]api.DirectiveInfo, bool) {
 	source, err := s.Parse()
 	if err != nil {
 		return nil, false
@@ -210,7 +195,7 @@ func Match(s, o api.Advertisement) ([]Directive, bool) {
 		return nil, false
 	}
 
-	var result []Directive
+	var result []api.DirectiveInfo
 
 	for _, scap := range source.Caps {
 		for _, tcap := range target.Caps {
@@ -218,10 +203,10 @@ func Match(s, o api.Advertisement) ([]Directive, bool) {
 				for _, sci := range scap.Codecs {
 					for _, tci := range tcap.Codecs {
 						if sci.Match(tci) {
-							d := Directive{
-								sourceId: scap.Id,
-								sinkId:   tcap.Id,
-								codec:    sci,
+							d := api.DirectiveInfo{
+								SourceId: scap.Id,
+								SinkId:   tcap.Id,
+								Codec:    sci,
 							}
 							result = append(result, d)
 							break

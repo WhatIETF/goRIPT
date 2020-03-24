@@ -120,6 +120,10 @@ func (c *riptClient) recordContent() {
 	defer func() {
 		c.doneChan <- true
 	}()
+	clientDirective, err := c.callInfo.ClientDirective.Parse()
+	chk(err)
+
+	log.Printf("Start media send from src [%d] --> sink [%d]", clientDirective.SourceId, clientDirective.SinkId)
 
 	mic, err := NewMicrophone()
 	chk(err)
@@ -142,8 +146,8 @@ func (c *riptClient) recordContent() {
 				SeqNo:       uint64(contentId),
 				Timestamp:   uint64(millis),
 				PayloadType: api.PayloadTypeOpus,
-				SourceId:    1,
-				SinkId:      1,
+				SourceId:    clientDirective.SourceId,
+				SinkId:      clientDirective.SinkId,
 				Media:       content,
 			}
 
@@ -288,6 +292,7 @@ func main() {
 	// 3. create calls object
 	riptClient.placeCalls()
 
+	// 4. deliver/receive media
 	if mode == "push" {
 		go riptClient.recordContent()
 	}

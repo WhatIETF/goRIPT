@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/go-acme/lego/log"
@@ -28,7 +29,7 @@ func (ci CodecInfo) Match(other CodecInfo) bool {
 }
 
 type Capability struct {
-	Id        string
+	Id        uint8
 	Direction string
 	Codecs    []CodecInfo
 }
@@ -53,15 +54,17 @@ func (ad Advertisement) Parse() (AdvertisementInfo, error) {
 			continue
 		}
 		parts := strings.Split(line, " ")
-		log.Printf("\tparts [%s]", parts)
-
 		if len(parts) < 3 {
 			// need id, dir and atleast one codec
 			return adInfo, fmt.Errorf("line [%d] misses minimally required slots", idx)
 		}
 
-		id := parts[0]
-		cap.Id = id
+		id, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return adInfo, err
+		}
+
+		cap.Id = uint8(id)
 
 		dir := strings.TrimRight(parts[1], ":")
 
@@ -80,4 +83,59 @@ func (ad Advertisement) Parse() (AdvertisementInfo, error) {
 		adInfo.Caps = append(adInfo.Caps, cap)
 	}
 	return adInfo, nil
+}
+
+//////
+// Directive
+/////
+
+type Directive string
+
+func (d Directive) Parse() (DirectiveInfo, error) {
+
+	dInfo := DirectiveInfo{}
+
+	sDirective := string(d)
+	parts := strings.Split(sDirective, ":")
+
+	log.Printf("\tparts [%s]", parts)
+
+	if len(parts) < 2 {
+		// need  src to sink, codecinfo
+		return DirectiveInfo{}, fmt.Errorf("misses minimally required slots")
+	}
+
+	srcDst := strings.Split(parts[0], "to")
+	src, err := strconv.Atoi(strings.TrimRight(srcDst[0], " "))
+	if err != nil {
+		return DirectiveInfo{}, err
+	}
+
+	dst, err := strconv.Atoi(strings.TrimLeft(srcDst[1], " "))
+	if err != nil {
+		return DirectiveInfo{}, err
+	}
+
+	dInfo.SourceId = uint8(src)
+	dInfo.SinkId = uint8(dst)
+	codec := strings.TrimRight(parts[1], ";")
+	dInfo.Codec = CodecInfo{codec}
+
+	return dInfo, nil
+}
+
+type DirectiveInfo struct {
+	SourceId uint8
+	SinkId   uint8
+	Codec    CodecInfo
+}
+
+func (di DirectiveInfo) GenClientDirectives() Directive {
+	d := strconv.Itoa(int(di.SinkId)) + " to " + strconv.Itoa(int(di.SourceId)) + ":" + di.Codec.Codec + ";"
+	return Directive(d)
+}
+
+func (di DirectiveInfo) GenServerDirectives() Directive {
+	d := strconv.Itoa(int(di.SourceId)) + " to " + strconv.Itoa(int(di.SinkId)) + ":" + di.Codec.Codec + ";"
+	return Directive(d)
 }
