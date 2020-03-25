@@ -216,10 +216,8 @@ func Match(s, o api.Advertisement) ([]api.DirectiveInfo, bool) {
 			}
 		}
 	}
-
 	if len(result) == 0 {
 		return result, false
 	}
-
 	return result, true
 }

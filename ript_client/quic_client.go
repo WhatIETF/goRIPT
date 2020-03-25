@@ -13,7 +13,7 @@ import (
 
 	"github.com/bifurcation/mint/syntax"
 
-	"github.com/WhatIETF/goRIPT/common"
+	"github.com/WhatIETF/goRIPT/testData"
 
 	"github.com/WhatIETF/goRIPT/api"
 	"github.com/labstack/gommon/log"
@@ -41,7 +41,7 @@ func NewQuicClientFace(serverInfo *riptProviderInfo, dev bool) *QuicClientFace {
 	}
 	// add ca-cert when run in dev mode alone
 	if dev {
-		common.AddRootCA(pool)
+		testData.AddRootCA(pool)
 	}
 
 	quicConf := &quic.Config{
@@ -130,8 +130,8 @@ func (c *QuicClientFace) Send(pkt api.Packet) error {
 		if err != nil || res.StatusCode != 200 {
 			break
 		}
-		log.Printf("ript_client:send: posted media fragment Id [%d], len [%d]", pkt.StreamMedia.SeqNo,
-			len(pkt.StreamMedia.Media))
+		//log.Printf("ript_client:send: posted media fragment Id [%d], len [%d]", pkt.StreamMedia.SeqNo,
+		//	len(pkt.StreamMedia.Media))
 
 	case api.StreamMediaRequestPacket:
 		url := c.serverInfo.baseUrl + c.serverInfo.getTrunkGroupUri() + "/calls/123/media"

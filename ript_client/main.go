@@ -140,6 +140,7 @@ func (c *riptClient) recordContent() {
 			return
 		case content := <-contentChan:
 			nanos := time.Now().UnixNano()
+			log.Printf("")
 			millis := nanos / 1000000
 			m := api.StreamContentMedia{
 				Type:        api.StreamContentTypeMedia,
@@ -174,7 +175,6 @@ func (c *riptClient) playOutContent() {
 	c.client.SetReceiveChan(c.recvChan)
 	speaker, err := NewSpeaker()
 	chk(err)
-
 	for {
 		select {
 		case <-c.stopChan:
