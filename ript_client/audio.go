@@ -8,14 +8,14 @@ import (
 )
 
 const (
-	sampleRate      = 48000
-	readBufferSize  = 4800
-	writeBufferSize = 4800
+	sampleRate      = 16000
+	readBufferSize  = 1600
+	writeBufferSize = 1600
 
 	audioChannels       = 1
-	opusFrameMs         = 60
+	opusFrameMs         = 20
 	opusFrameSamples    = sampleRate / 1000 * opusFrameMs
-	opusFrameBufferSize = 480
+	opusFrameBufferSize = 160
 )
 
 func packFrames(frames [][]byte) []byte {

@@ -135,7 +135,7 @@ func (c *QuicClientFace) Send(pkt api.Packet) error {
 
 	case api.StreamMediaRequestPacket:
 		url := c.serverInfo.baseUrl + c.serverInfo.getTrunkGroupUri() + "/calls/123/media"
-		log.Printf("ript_client: mediaPull: Url [%s]", url)
+		//log.Printf("ript_client: mediaPull: Url [%s]", url)
 		res, err = c.client.Get(url)
 		if err != nil || res.StatusCode != 200 {
 			break
@@ -162,8 +162,8 @@ func (c *QuicClientFace) Send(pkt api.Packet) error {
 			StreamMedia: media,
 		}
 
-		log.Printf("ript_client:mediapull: received content Id [%d], len [%d] bytes",
-			responsePacket.StreamMedia.SeqNo, len(responsePacket.StreamMedia.Media))
+		//log.Printf("ript_client:mediapull: received content Id [%d], len [%d] bytes",
+		//	responsePacket.StreamMedia.SeqNo, len(responsePacket.StreamMedia.Media))
 
 		// forward the packet for further processing
 		c.recvChan <- api.PacketEvent{
