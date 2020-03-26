@@ -181,7 +181,14 @@ func (c *riptClient) playOutContent() {
 			log.Println("playout stopped")
 			return
 		case evt := <-c.recvChan:
-			log.Printf("got media evt : [%v]", evt)
+			timeInMillis := int64(evt.Packet.StreamMedia.Timestamp)
+			timeInNanos := timeInMillis * 1000000
+			t := time.Unix(0, timeInNanos)
+			now := time.Now()
+			diff := now.Sub(t)
+			log.Printf("got media evt : SeqNo [%d] at [%v]:[%v] - [%v]", evt.Packet.StreamMedia.SeqNo, t, time.Now(), diff)
+
+			//	log.Printf("got media evt : [%v]", evt)
 			go speaker.Play(evt.Packet.StreamMedia.Media)
 			continue
 		default:
