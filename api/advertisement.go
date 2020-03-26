@@ -3,10 +3,9 @@ package api
 import (
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
-
-	"github.com/go-acme/lego/log"
 )
 
 const (
@@ -46,7 +45,6 @@ func (ad Advertisement) Parse() (AdvertisementInfo, error) {
 		return AdvertisementInfo{}, errors.New("error parsing advertisement")
 	}
 
-	log.Println("lines [%s]", adLines)
 	adInfo := AdvertisementInfo{}
 	for idx, line := range adLines {
 		var cap Capability
