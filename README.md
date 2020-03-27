@@ -38,6 +38,16 @@ brew install pkg-config portaudio  opus  opusfile
 go get github.com/lucas-clemente/quic-go
 go get github.com/gordonklaus/portaudio
 go get gopkg.in/hraban/opus.v2
+
+go get github.com/bifurcation/mint/syntax
+go get github.com/google/uuid
+go get github.com/gorilla/mux
+go get github.com/gorilla/websocket
+go get github.com/labstack/gommon/log
+go get github.com/marten-seemann/qpack
+go get golang.org/x/net/http/httpguts
+go get golang.org/x/net/http2/hpack
+go get golang.org/x/net/idna
 ```
 
 4. you will need this package in your gopath so it is found
