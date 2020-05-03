@@ -1,0 +1,59 @@
+title goRIPT Media Flow
+
+Alice->Server: GET carrier.com/.well-known/ript/v1/providertgs
+note right of Alice:
+Trunk Group Discovery
+end note
+Server->Alice: Default Trunk group details
+
+Alice->Server: POST carrier.com/.well-known/ript/v1/providertgs/<tg>/handlers
+note right of Alice
+Handler:Registration
+Alice provides handlerId, 
+media cap advertisement
+end note
+Server->Alice: 200 OK, HandlerUri
+
+Bob->Server: GET carrier.com/.well-known/ript/v1/providertgs
+note left of Bob:
+Trunk Group Discovery
+end note
+Server->Bob: Default Trunk group details
+Bob->Server: POST carrier.com/.well-known/ript/v1/providertgs/<tg>/handlers
+note left of Bob
+HandlerRegistration
+Alice provides handlerId, 
+media cap advertisement
+end note
+Server->Bob: 200 OK, HandlerUri
+
+Alice->Server: POST carrier.com/.well-known/ript/v1/providertgs/<tg>/calls
+note right of Alice
+Call Setup:
+Alice provides handlerUri, 
+Destination Address (hardcoded)
+end note
+Server->Alice: 200 OK, CallUri, Client/Server Directives
+
+Bob->Server: POST carrier.com/.well-known/ript/v1/providertgs/<tg>/calls
+note left of Bob
+Call Setup:
+Bob provides handlerUri, 
+Desitnation Address (hardcoded)
+end note
+Server->Bob: 200 OK, CallUri, Client/Server Directives
+
+Alice->Server: PUT carrier.com/.well-known/ript/v1/providertgs/<tg>/calls/<callId>/media
+note right of Alice
+Media Send:
+Alice sends media chunk
+end note
+Server->Alice: 200 OK
+
+
+Bob->Server: GET carrier.com/.well-known/ript/v1/providertgs/<tg>/calls/<callId>/media
+note left of Bob
+Media Receive:
+Bob pulls meda chunk
+end note
+Server->Bob: 200 OK
